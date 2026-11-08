@@ -1,0 +1,2822 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>班級座位表與亂數分組系統 (6x4 雙向拖曳版)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Inter & Noto Sans TC -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        body {
+            font-family: 'Inter', 'Noto Sans TC', sans-serif;
+            background-color: #f1f5f9;
+        }
+
+        /* 強化拖曳體驗：防止文字選取干擾拖曳，並確保內部文字不阻擋拖曳事件 */
+        .draggable-item {
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-user-drag: element;
+            touch-action: manipulation;
+            transition: transform 0.16s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.16s ease, border-color 0.16s ease, background-color 0.16s ease;
+        }
+        .draggable-item:hover {
+            transform: translateY(-2px);
+        }
+        /* 讓卡片內部非按鈕的子元素不攔截滑鼠/拖曳事件，解決拖曳學生姓名失效問題 */
+        .drag-content-area {
+            pointer-events: none;
+        }
+        .interactive-btn {
+            pointer-events: auto;
+        }
+
+        /* 拖曳中與放置目標的視覺回饋 */
+        .dragging {
+            opacity: 0.45 !important;
+            transform: scale(0.95) !important;
+            border-style: dashed !important;
+        }
+        .drag-over {
+            border-color: #4f46e5 !important;
+            background-color: #e0e7ff !important;
+            transform: scale(1.03) !important;
+            box-shadow: 0 10px 20px -5px rgba(79, 70, 229, 0.28) !important;
+        }
+        .roster-drag-over {
+            background-color: #eef2ff !important;
+            border-color: #4f46e5 !important;
+            box-shadow: inset 0 0 0 2px rgba(79, 70, 229, 0.3);
+        }
+
+        /* 點擊選取高亮狀態 */
+        .selected-item {
+            border-color: #f59e0b !important;
+            background-color: #fffbeb !important;
+            box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.35);
+            animation: pulse-ring 1.5s infinite;
+        }
+
+        @keyframes pulse-ring {
+            0%, 100% { box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.45); }
+            50% { box-shadow: 0 0 0 5px rgba(245, 158, 11, 0.15); }
+        }
+
+        /* 隨機洗牌動畫 */
+        @keyframes shuffle-pop {
+            0% { transform: scale(0.92); opacity: 0.6; }
+            50% { transform: scale(1.03); }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .animate-shuffle {
+            animation: shuffle-pop 0.32s ease-out;
+        }
+
+        /* 自訂捲軸 */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f5f9;
+            border-radius: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+
+        /* 浮動拖曳分身 (支援觸控與平滑拖曳) */
+        #touchDragGhost {
+            position: fixed;
+            pointer-events: none;
+            z-index: 9999;
+            transform: translate(-50%, -50%) rotate(2deg);
+            box-shadow: 0 15px 30px -5px rgba(15, 23, 42, 0.25);
+        }
+
+        /* 作業訂正狀態：高對比視覺效果 (適合教室投影遠距離觀看) */
+        .hw-card-needs {
+            background-color: #fff1f2 !important;
+            border-color: #f43f5e !important;
+            box-shadow: 0 0 0 2px rgba(244, 63, 94, 0.2) !important;
+        }
+        .hw-card-progress {
+            background-color: #fffbeb !important;
+            border-color: #f59e0b !important;
+            box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2) !important;
+        }
+        .hw-card-done {
+            background-color: #ecfdf5 !important;
+            border-color: #10b981 !important;
+        }
+
+        /* 突顯未完成學生模式：將已完成者淡化，未完成者呼吸燈閃爍 */
+        .highlight-unfinished-mode .hw-status-done,
+        .highlight-unfinished-mode .hw-status-none {
+            opacity: 0.32 !important;
+            filter: grayscale(40%);
+            transform: scale(0.97);
+        }
+        .highlight-unfinished-mode .hw-status-needs,
+        .highlight-unfinished-mode .hw-status-progress {
+            animation: urgent-pulse 1.6s infinite;
+            z-index: 10;
+        }
+        @keyframes urgent-pulse {
+            0%, 100% {
+                transform: scale(1.02);
+                box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.45), 0 10px 15px -3px rgba(244, 63, 94, 0.2);
+            }
+            50% {
+                transform: scale(1.05);
+                box-shadow: 0 0 0 7px rgba(244, 63, 94, 0.15), 0 12px 20px -3px rgba(244, 63, 94, 0.3);
+            }
+        }
+
+        /* 全螢幕學生投影看板模式：隱藏左側待排區，放大座位表 */
+        body.projection-mode aside#leftRosterSidebar {
+            display: none !important;
+        }
+        body.projection-mode section#rightMainSection {
+            grid-column: span 12 / span 12 !important;
+        }
+        body.projection-mode .seat-card {
+            min-height: 128px !important;
+        }
+        body.projection-mode .student-name-display {
+            font-size: 1.35rem !important;
+        }
+
+        /* 列印專用樣式 */
+        @media print {
+            body {
+                background-color: #ffffff !important;
+            }
+            .no-print {
+                display: none !important;
+            }
+            .print-layout {
+                display: block !important;
+            }
+            .print-container {
+                width: 100% !important;
+                max-width: 100% !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                box-shadow: none !important;
+                border: none !important;
+            }
+            .seat-card {
+                break-inside: avoid;
+                box-shadow: none !important;
+                border: 2px solid #64748b !important;
+                min-height: 92px !important;
+                print-color-adjust: exact;
+                -webkit-print-color-adjust: exact;
+            }
+            .podium-box, .group-badge {
+                print-color-adjust: exact;
+                -webkit-print-color-adjust: exact;
+            }
+            @page {
+                size: landscape;
+                margin: 0.8cm;
+            }
+        }
+    </style>
+</head>
+<body class="text-slate-800 min-h-screen flex flex-col">
+
+    <!-- 頂部導覽與控制列 -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs no-print">
+        <div class="max-w-[1440px] mx-auto px-4 sm:px-6 py-3">
+            <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
+                
+                <!-- 標題與班級名稱 -->
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-200 shrink-0">
+                        <i class="fa-solid fa-chalkboard-user text-lg"></i>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <input type="text" id="classNameInput" value="三年一班 座位與分組表" 
+                                class="font-bold text-xl text-slate-900 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-indigo-600 focus:outline-none px-1 py-0.5 rounded transition"
+                                title="點擊修改班級標題">
+                            <i class="fa-solid fa-pen text-xs text-slate-400"></i>
+                        </div>
+                        <p class="text-xs text-slate-500">規格：一橫排 6 人 × 共 4 橫排（24 人座）｜支援雙向拖曳姓名與亂數分組</p>
+                    </div>
+                </div>
+
+                <!-- 工具按鈕群 -->
+                <div class="flex flex-wrap items-center gap-2">
+                    <button onclick="unassignAllSeats()" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-medium text-xs sm:text-sm transition cursor-pointer" title="將未鎖定座位的學生移回左側待排區，重新拖曳排位">
+                        <i class="fa-solid fa-users-rectangle text-amber-600"></i>
+                        <span>全部退回名單</span>
+                    </button>
+
+                    <button onclick="autoFillByNumber()" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-medium text-xs sm:text-sm shadow-2xs transition cursor-pointer" title="依座號順序填入空位">
+                        <i class="fa-solid fa-arrow-down-1-9 text-indigo-600"></i>
+                        <span>依座號入座</span>
+                    </button>
+
+                    <button onclick="shuffleAllStudents()" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-medium text-xs sm:text-sm shadow-xs transition cursor-pointer" title="將名單與未鎖定座位混合隨機抽籤入座">
+                        <i class="fa-solid fa-shuffle"></i>
+                        <span>隨機抽籤排位</span>
+                    </button>
+
+                    <!-- 新增：亂數分組按鈕 -->
+                    <button onclick="openGroupModal()" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-medium text-xs sm:text-sm shadow-xs transition cursor-pointer" title="開啟亂數分組與小組鄰近排位設定">
+                        <i class="fa-solid fa-people-group"></i>
+                        <span>亂數分組</span>
+                    </button>
+
+                    <!-- 新增：投影看板放大檢視切換 -->
+                    <button onclick="toggleProjectionMode()" id="projectionModeBtn" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs sm:text-sm shadow-xs transition cursor-pointer" title="隱藏側邊欄並放大座位表，方便投影在教室前方讓學生查看訂正狀態">
+                        <i class="fa-solid fa-tv"></i>
+                        <span id="projectionModeText">學生檢視投影模式</span>
+                    </button>
+
+                    <div class="h-5 w-px bg-slate-200 mx-0.5 hidden sm:block"></div>
+
+                    <button onclick="togglePerspective()" id="perspectiveBtn" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-medium text-xs sm:text-sm shadow-2xs transition cursor-pointer">
+                        <i class="fa-solid fa-arrows-rotate text-emerald-600"></i>
+                        <span id="perspectiveText">視角：講台在上方</span>
+                    </button>
+
+                    <button onclick="openRosterModal()" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-medium text-xs sm:text-sm shadow-2xs transition cursor-pointer">
+                        <i class="fa-solid fa-file-import text-indigo-600"></i>
+                        <span>批次名單</span>
+                    </button>
+
+                    <button onclick="window.print()" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-medium text-xs sm:text-sm shadow-2xs transition cursor-pointer">
+                        <i class="fa-solid fa-print text-slate-600"></i>
+                        <span>列印</span>
+                    </button>
+
+                    <button onclick="openResetModal()" class="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 font-medium text-xs sm:text-sm transition cursor-pointer" title="重置系統">
+                        <i class="fa-solid fa-rotate-left"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主內容區：左側待排學生名單 + 右側 6x4 座位表與分組結果 -->
+    <main class="flex-1 max-w-[1440px] w-full mx-auto px-4 sm:px-6 py-5">
+        <div class="print-layout grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            
+            <!-- 左側欄：學生名單待排區 (Unassigned Roster Pool) - 列印時隱藏 -->
+            <aside id="leftRosterSidebar" class="lg:col-span-4 xl:col-span-3 bg-white rounded-3xl border border-slate-200 shadow-xs p-4 sm:p-5 flex flex-col lg:sticky lg:top-20 no-print">
+                
+                <!-- 側邊欄標題與人數統計 -->
+                <div class="flex items-center justify-between border-b border-slate-100 pb-3 mb-3">
+                    <div class="flex items-center gap-2">
+                        <span class="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
+                            <i class="fa-solid fa-hand-back-fist"></i>
+                        </span>
+                        <div>
+                            <h2 class="font-bold text-slate-800 text-base leading-tight">學生名單 (待排區)</h2>
+                            <p class="text-[11px] text-slate-500">按住學生姓名即可拖曳至右側座位</p>
+                        </div>
+                    </div>
+                    <span id="poolCountBadge" class="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800">
+                        待排 0 人
+                    </span>
+                </div>
+
+                <!-- 快速新增單一學生至待排區 -->
+                <form onsubmit="quickAddStudentToPool(event)" class="flex gap-1.5 mb-3">
+                    <input type="text" id="quickNoInput" placeholder="座號" class="w-14 px-2.5 py-1.5 rounded-xl border border-slate-200 text-xs focus:border-indigo-500 focus:outline-none">
+                    <input type="text" id="quickNameInput" placeholder="新增學生姓名..." class="flex-1 px-3 py-1.5 rounded-xl border border-slate-200 text-xs focus:border-indigo-500 focus:outline-none" required>
+                    <button type="submit" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium transition shrink-0 cursor-pointer" title="新增至待排區">
+                        <i class="fa-solid fa-plus"></i> 新增
+                    </button>
+                </form>
+
+                <!-- 雙向拖曳接收區 (可以把座位上的學生拖回來放開) -->
+                <div id="rosterDropZone" 
+                    class="custom-scrollbar min-h-[260px] max-h-[480px] overflow-y-auto rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50/70 p-3 transition-all">
+                    
+                    <!-- 空狀態提示 -->
+                    <div id="emptyPoolState" class="hidden h-52 flex flex-col items-center justify-center text-center px-3 text-slate-400">
+                        <div class="w-12 h-12 rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center text-xl mb-2">
+                            <i class="fa-solid fa-check-double"></i>
+                        </div>
+                        <p class="text-sm font-bold text-slate-600">名單內學生皆已入座！</p>
+                        <p class="text-xs text-slate-400 mt-1 mb-3">
+                            若要從頭手動拖曳排位，請點擊下方按鈕將學生退回此待排區，或直接拖曳右側座位互換。
+                        </p>
+                        <button type="button" onclick="unassignAllSeats()" class="px-3 py-1.5 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-900 font-semibold text-xs transition cursor-pointer">
+                            <i class="fa-solid fa-rotate-left mr-1"></i>將學生退回此處開始拖曳
+                        </button>
+                    </div>
+
+                    <!-- 待排學生名牌網格 -->
+                    <div id="rosterListGrid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 gap-2">
+                        <!-- 由 JS 動態生成可拖曳的學生名牌 -->
+                    </div>
+                </div>
+
+                <!-- 側邊欄底部操作提示與統計 -->
+                <div class="mt-3 pt-3 border-t border-slate-100 flex flex-col gap-2 text-xs text-slate-500">
+                    <div class="flex items-center justify-between font-medium">
+                        <span>已入座：<strong id="seatedCountText" class="text-indigo-600">24</strong> / 24 席</span>
+                        <span>已鎖定：<strong id="lockedCountText" class="text-amber-600">0</strong> 席</span>
+                    </div>
+                    <div class="bg-indigo-50/80 text-indigo-950 rounded-xl p-2.5 text-[11px] leading-relaxed border border-indigo-100">
+                        <i class="fa-solid fa-up-down-left-right text-indigo-600 mr-1"></i>
+                        <b>雙重排位支援：</b><br>
+                        1. <b>按住拖曳</b>：直接按住「待排區名牌」或「座位上學生姓名」即可拖曳移動或互換。<br>
+                        2. <b>點擊互換</b>：點一下學生姓名、再點一下目標座位亦可立即交換！
+                    </div>
+                </div>
+            </aside>
+
+            <!-- 右側欄：6x4 教室座位表畫布區 + 作業訂正看板 + 分組結果一覽 -->
+            <section id="rightMainSection" class="lg:col-span-8 xl:col-span-9 flex flex-col gap-5">
+                
+                <!-- 新增：作業訂正狀態看板控制中心 (Homework Correction Tracker Dashboard) -->
+                <div class="bg-white rounded-3xl border-2 border-indigo-100 shadow-xs p-4 sm:p-5 no-print">
+                    <!-- 第一列：作業科目標籤頁 (Subject Tabs) 與新增項目 -->
+                    <div class="flex flex-col xl:flex-row xl:items-center justify-between gap-3 pb-3.5 border-b border-slate-100">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-xs sm:text-sm font-bold shadow-2xs">
+                                <i class="fa-solid fa-clipboard-check"></i>
+                                <span>作業訂正看板</span>
+                            </span>
+
+                            <!-- 動態作業項目 Tabs -->
+                            <div id="hwTabsContainer" class="flex items-center gap-1.5 flex-wrap">
+                                <!-- 由 JS 動態生成科目 Tabs -->
+                            </div>
+
+                            <button onclick="openHwModal('add')" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-indigo-50 text-slate-600 hover:text-indigo-600 text-xs font-bold border border-dashed border-slate-300 transition cursor-pointer" title="新增作業或訂正項目">
+                                <i class="fa-solid fa-plus"></i>
+                                <span>新增作業</span>
+                            </button>
+                            <button onclick="openHwModal('edit')" class="inline-flex items-center gap-1 px-2 py-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 text-xs transition cursor-pointer" title="修改或刪除目前作業名稱">
+                                <i class="fa-solid fa-gear"></i>
+                            </button>
+                        </div>
+
+                        <!-- 點擊快速批改模式切換 -->
+                        <div class="flex items-center gap-2 self-start xl:self-auto">
+                            <button onclick="toggleQuickCheckMode()" id="quickCheckModeBtn" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border-2 border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100 text-indigo-800 text-xs font-bold transition cursor-pointer" title="開啟後，直接點擊學生座位即可一鍵切換訂正狀態，方便老師快速勾選">
+                                <i class="fa-solid fa-bolt text-amber-500"></i>
+                                <span id="quickCheckModeText">一鍵點名批改：關閉 (點擊徽章切換)</span>
+                            </button>
+
+                            <button onclick="toggleHighlightUnfinished()" id="highlightUnfinishedBtn" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border-2 border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition cursor-pointer" title="將已過關的座位調暗，並讓尚未訂正完的學生座位閃爍突顯">
+                                <i class="fa-solid fa-bullseye"></i>
+                                <span id="highlightUnfinishedText">突顯未完成學生</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 第二列：即時完成率進度條、各狀態人數統計、全班批次設定按鈕 -->
+                    <div class="pt-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                        <!-- 統計數據與進度條 -->
+                        <div class="flex-1 space-y-2">
+                            <div class="flex flex-wrap items-center justify-between gap-2 text-xs sm:text-sm">
+                                <div class="flex flex-wrap items-center gap-2 sm:gap-3 font-bold">
+                                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800">
+                                        <i class="fa-solid fa-circle-check text-emerald-600"></i>
+                                        已完成過關：<strong id="statDoneCount" class="text-base">0</strong> 人
+                                    </span>
+                                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-100 text-rose-800">
+                                        <i class="fa-solid fa-circle-exclamation text-rose-600"></i>
+                                        待訂正：<strong id="statNeedsCount" class="text-base">0</strong> 人
+                                    </span>
+                                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-100 text-amber-800">
+                                        <i class="fa-solid fa-pen-to-square text-amber-600"></i>
+                                        訂正中/重訂：<strong id="statProgressCount" class="text-base">0</strong> 人
+                                    </span>
+                                </div>
+                                <div class="text-xs font-extrabold text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-lg">
+                                    過關率：<span id="statCompletionRate">0%</span>
+                                </div>
+                            </div>
+
+                            <!-- 視覺化彩色進度條 -->
+                            <div class="w-full h-3 bg-slate-100 rounded-full overflow-hidden flex p-0.5 gap-0.5 border border-slate-200/80">
+                                <div id="barDone" class="h-full bg-emerald-500 rounded-l-full transition-all duration-300" style="width: 0%" title="已訂正過關"></div>
+                                <div id="barProgress" class="h-full bg-amber-400 transition-all duration-300" style="width: 0%" title="訂正中/重訂"></div>
+                                <div id="barNeeds" class="h-full bg-rose-500 rounded-r-full transition-all duration-300" style="width: 0%" title="待訂正"></div>
+                            </div>
+                        </div>
+
+                        <!-- 批次設定按鈕群 -->
+                        <div class="flex flex-wrap items-center gap-1.5 shrink-0 border-t lg:border-t-0 lg:border-l border-slate-100 pt-2.5 lg:pt-0 lg:pl-4">
+                            <span class="text-[11px] font-bold text-slate-400 mr-1">全班批次設為：</span>
+                            <button onclick="batchSetHwStatus('needs')" class="px-2.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold transition cursor-pointer">
+                                ❌ 全員待訂正
+                            </button>
+                            <button onclick="batchSetHwStatus('done')" class="px-2.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-bold transition cursor-pointer">
+                                ✅ 全員已過關
+                            </button>
+                            <button onclick="batchSetHwStatus('none')" class="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-medium transition cursor-pointer">
+                                ⚪ 清除本項狀態
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 教室座位表主卡片 -->
+                <div class="print-container bg-white rounded-3xl border border-slate-200 shadow-xs p-4 sm:p-7 flex flex-col">
+                    
+                    <!-- 列印時顯示的標題列 -->
+                    <div class="hidden print:flex items-center justify-between border-b-2 border-slate-800 pb-3 mb-5">
+                        <div>
+                            <h1 id="printTitle" class="text-2xl font-bold text-slate-900">三年一班 座位與分組表</h1>
+                            <p id="printHwSubtitle" class="text-sm font-semibold text-slate-600 mt-0.5"></p>
+                        </div>
+                        <span id="printDate" class="text-sm text-slate-500"></span>
+                    </div>
+
+                    <!-- 頂部狀態與快速分組控制條 -->
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-4 pb-3 border-b border-slate-100 no-print">
+                        <div class="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 font-medium">
+                                <i class="fa-solid fa-arrows-up-down-left-right text-indigo-600"></i>
+                                按住姓名可拖曳換位
+                            </span>
+                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 font-medium">
+                                <i class="fa-solid fa-hand-pointer"></i>
+                                點擊座位上的「訂正狀態按鈕」可立即切換：<b class="text-rose-600">待訂正</b> ➔ <b class="text-emerald-600">已過關</b> ➔ <b class="text-amber-600">訂正中</b>
+                            </span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button id="clearGroupsBtn" onclick="clearAllGroups()" class="hidden inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-medium transition cursor-pointer">
+                                <i class="fa-solid fa-eraser"></i>
+                                <span>清除分組標記</span>
+                            </button>
+                            <button onclick="openGroupModal()" class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-semibold transition cursor-pointer">
+                                <i class="fa-solid fa-dice"></i>
+                                <span>快速亂數分組</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 選取狀態提示橫幅 -->
+                    <div id="selectionBanner" class="hidden mb-4 px-4 py-2.5 rounded-2xl bg-amber-50 border border-amber-300 text-amber-900 text-xs sm:text-sm flex items-center justify-between no-print">
+                        <div class="flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping"></span>
+                            <span id="selectionBannerText">已選取學生，請點擊任意座位進行安排或交換。</span>
+                        </div>
+                        <button onclick="clearSelection()" class="text-xs font-bold text-amber-700 hover:text-amber-950 px-2 py-0.5 rounded bg-amber-200/60 cursor-pointer">
+                            取消選取 (Esc)
+                        </button>
+                    </div>
+
+                    <!-- 頂部講台區 (預設顯示於上方) -->
+                    <div id="podiumTop" class="mb-6 flex flex-col items-center">
+                        <div class="podium-box w-full max-w-md py-2.5 px-6 rounded-2xl bg-slate-800 text-white shadow-sm flex items-center justify-center gap-3 border-b-4 border-slate-950">
+                            <i class="fa-solid fa-chalkboard text-emerald-400 text-lg"></i>
+                            <span class="font-bold tracking-widest text-base sm:text-lg">講 台 / 黑 板 (前方)</span>
+                        </div>
+                    </div>
+
+                    <!-- 橫排標籤與 6x4 座位網格區 -->
+                    <div class="w-full overflow-x-auto pb-2 custom-scrollbar">
+                        <div class="min-w-[680px]">
+                            <!-- 直行(Column)標示 -->
+                            <div id="colHeaders" class="grid grid-cols-6 gap-2.5 sm:gap-3.5 mb-2 px-1 text-center text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                                <!-- 由 JS 動態生成 第 1 直行 ~ 第 6 直行 -->
+                            </div>
+
+                            <!-- 4 橫排 x 6 個座位 網格容器 -->
+                            <div id="seatingGrid" class="flex flex-col gap-3.5 sm:gap-4">
+                                <!-- 由 JS 動態生成 4 個橫排，每橫排 6 個座位 -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 底部講台區 (當切換為教師俯視視角時顯示於下方) -->
+                    <div id="podiumBottom" class="mt-6 flex flex-col items-center hidden">
+                        <div class="podium-box w-full max-w-md py-2.5 px-6 rounded-2xl bg-slate-800 text-white shadow-sm flex items-center justify-center gap-3 border-t-4 border-slate-950">
+                            <i class="fa-solid fa-chalkboard text-emerald-400 text-lg"></i>
+                            <span class="font-bold tracking-widest text-base sm:text-lg">講 台 / 黑 板 (教師講桌視角前方)</span>
+                        </div>
+                    </div>
+
+                    <!-- 教室後方標示 -->
+                    <div id="classroomBackLabel" class="mt-5 text-center text-xs font-medium text-slate-400 tracking-widest uppercase">
+                        <span>— 教室後方 (佈告欄 / 置物櫃) —</span>
+                    </div>
+                </div>
+
+                <!-- 作業訂正未完成 & 已完成名單快速一覽 (方便學生/小老師核對) -->
+                <div id="hwSummaryListsPanel" class="bg-white rounded-3xl border border-slate-200 shadow-xs p-5 sm:p-6 no-print">
+                    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3 mb-4">
+                        <div class="flex items-center gap-2.5">
+                            <span class="w-9 h-9 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center font-bold">
+                                <i class="fa-solid fa-list-check"></i>
+                            </span>
+                            <div>
+                                <h3 class="font-bold text-slate-900 text-base sm:text-lg">
+                                    【<span id="currentHwTitleLabel" class="text-indigo-600">國習訂正</span>】訂正狀態快速核對榜
+                                </h3>
+                                <p class="text-xs text-slate-500">點擊下方學生名牌也可直接將該生切換為「✅ 已訂正過關」</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <!-- 待訂正名單 -->
+                        <div class="rounded-2xl border-2 border-rose-200 bg-rose-50/50 p-3.5">
+                            <div class="flex items-center justify-between mb-2.5 pb-2 border-b border-rose-200/70">
+                                <span class="font-bold text-sm text-rose-800 flex items-center gap-1.5">
+                                    <i class="fa-solid fa-circle-exclamation text-rose-600"></i>
+                                    待訂正名單
+                                </span>
+                                <span id="listCountNeeds" class="px-2 py-0.5 rounded-full text-xs font-extrabold bg-rose-600 text-white">0 人</span>
+                            </div>
+                            <div id="listContainerNeeds" class="flex flex-wrap gap-1.5 min-h-[44px]"></div>
+                        </div>
+
+                        <!-- 訂正中 / 需重訂名單 -->
+                        <div class="rounded-2xl border-2 border-amber-200 bg-amber-50/50 p-3.5">
+                            <div class="flex items-center justify-between mb-2.5 pb-2 border-b border-amber-200/70">
+                                <span class="font-bold text-sm text-amber-900 flex items-center gap-1.5">
+                                    <i class="fa-solid fa-pen-to-square text-amber-600"></i>
+                                    訂正中 / 退回重訂
+                                </span>
+                                <span id="listCountProgress" class="px-2 py-0.5 rounded-full text-xs font-extrabold bg-amber-500 text-white">0 人</span>
+                            </div>
+                            <div id="listContainerProgress" class="flex flex-wrap gap-1.5 min-h-[44px]"></div>
+                        </div>
+
+                        <!-- 已完成過關名單 -->
+                        <div class="rounded-2xl border-2 border-emerald-200 bg-emerald-50/50 p-3.5">
+                            <div class="flex items-center justify-between mb-2.5 pb-2 border-b border-emerald-200/70">
+                                <span class="font-bold text-sm text-emerald-900 flex items-center gap-1.5">
+                                    <i class="fa-solid fa-circle-check text-emerald-600"></i>
+                                    已訂正過關
+                                </span>
+                                <span id="listCountDone" class="px-2 py-0.5 rounded-full text-xs font-extrabold bg-emerald-600 text-white">0 人</span>
+                            </div>
+                            <div id="listContainerDone" class="flex flex-wrap gap-1.5 min-h-[44px]"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 亂數分組名單一覽表 (當有進行分組時顯示，支援列印) -->
+                <div id="groupsSummaryPanel" class="hidden print-container bg-white rounded-3xl border border-slate-200 shadow-xs p-5 sm:p-6">
+                    <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3 mb-4">
+                        <div class="flex items-center gap-2.5">
+                            <span class="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
+                                <i class="fa-solid fa-people-group"></i>
+                            </span>
+                            <div>
+                                <h3 class="font-bold text-slate-900 text-base sm:text-lg">班級分組名單一覽表</h3>
+                                <p id="groupSummarySubtitle" class="text-xs text-slate-500">各組組員與座號清單（點擊座位上的組別標籤可微調組別）</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2 no-print">
+                            <button onclick="openGroupModal()" class="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold transition cursor-pointer">
+                                <i class="fa-solid fa-rotate mr-1"></i>重新亂數分組
+                            </button>
+                            <button onclick="clearAllGroups()" class="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-medium transition cursor-pointer">
+                                關閉分組顯示
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="groupsSummaryGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                        <!-- 由 JS 動態生成各組別卡片 -->
+                    </div>
+                </div>
+
+            </section>
+
+        </div>
+    </main>
+
+    <!-- 亂數分組設定視窗 (Modal) -->
+    <div id="groupModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 hidden flex items-center justify-center p-4 no-print">
+        <div class="bg-white rounded-3xl max-w-lg w-full p-6 shadow-xl border border-slate-100">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center text-lg">
+                        <i class="fa-solid fa-people-group"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-bold text-slate-900">亂數分組設定</h3>
+                        <p class="text-xs text-slate-500">支援隨機分組標記與小組鄰近座位自動編排</p>
+                    </div>
+                </div>
+                <button onclick="closeGroupModal()" class="text-slate-400 hover:text-slate-600 w-8 h-8 rounded-lg flex items-center justify-center hover:bg-slate-100 cursor-pointer">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <!-- 步驟 1：選擇組數 -->
+            <div class="mb-5">
+                <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                    1. 選擇分組數量（全班 24 人）
+                </label>
+                <div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5" id="groupCountOptionGrid">
+                    <button type="button" onclick="selectGroupCountOption(6)" data-count="6" class="group-count-btn p-3 rounded-2xl border-2 border-emerald-600 bg-emerald-50/70 text-left transition cursor-pointer">
+                        <div class="font-bold text-sm text-slate-900">分成 6 組</div>
+                        <div class="text-xs text-slate-500 mt-0.5">每組 4 人 (最常用)</div>
+                    </button>
+                    <button type="button" onclick="selectGroupCountOption(4)" data-count="4" class="group-count-btn p-3 rounded-2xl border-2 border-slate-200 hover:border-emerald-300 text-left transition cursor-pointer">
+                        <div class="font-bold text-sm text-slate-900">分成 4 組</div>
+                        <div class="text-xs text-slate-500 mt-0.5">每組 6 人 (橫排/大組)</div>
+                    </button>
+                    <button type="button" onclick="selectGroupCountOption(8)" data-count="8" class="group-count-btn p-3 rounded-2xl border-2 border-slate-200 hover:border-emerald-300 text-left transition cursor-pointer">
+                        <div class="font-bold text-sm text-slate-900">分成 8 組</div>
+                        <div class="text-xs text-slate-500 mt-0.5">每組 3 人 (三人小組)</div>
+                    </button>
+                    <button type="button" onclick="selectGroupCountOption(3)" data-count="3" class="group-count-btn p-3 rounded-2xl border-2 border-slate-200 hover:border-emerald-300 text-left transition cursor-pointer">
+                        <div class="font-bold text-sm text-slate-900">分成 3 組</div>
+                        <div class="text-xs text-slate-500 mt-0.5">每組 8 人 (三大隊)</div>
+                    </button>
+                    <button type="button" onclick="selectGroupCountOption(2)" data-count="2" class="group-count-btn p-3 rounded-2xl border-2 border-slate-200 hover:border-emerald-300 text-left transition cursor-pointer">
+                        <div class="font-bold text-sm text-slate-900">分成 2 組</div>
+                        <div class="text-xs text-slate-500 mt-0.5">每組 12 人 (對抗賽)</div>
+                    </button>
+                    <button type="button" onclick="selectGroupCountOption(12)" data-count="12" class="group-count-btn p-3 rounded-2xl border-2 border-slate-200 hover:border-emerald-300 text-left transition cursor-pointer">
+                        <div class="font-bold text-sm text-slate-900">分成 12 組</div>
+                        <div class="text-xs text-slate-500 mt-0.5">每組 2 人 (雙人配對)</div>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 步驟 2：選擇分組與座位連動方式 -->
+            <div class="mb-6">
+                <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                    2. 選擇座位排列方式
+                </label>
+                <div class="space-y-2.5">
+                    <label class="flex items-start gap-3 p-3.5 rounded-2xl border-2 border-slate-200 hover:border-emerald-400 cursor-pointer transition has-[:checked]:border-emerald-600 has-[:checked]:bg-emerald-50/50">
+                        <input type="radio" name="groupArrangeMode" value="cluster" checked class="mt-1 accent-emerald-600">
+                        <div>
+                            <div class="font-bold text-sm text-slate-900">亂數分組 ＋ 同組自動排在相鄰座位（推薦！）</div>
+                            <div class="text-xs text-slate-500 mt-0.5">將全班隨機分組後，自動把同一組的同學安排在相鄰座位區塊（例如 2×2 方塊或同橫排），方便小組討論。</div>
+                        </div>
+                    </label>
+                    <label class="flex items-start gap-3 p-3.5 rounded-2xl border-2 border-slate-200 hover:border-emerald-400 cursor-pointer transition has-[:checked]:border-emerald-600 has-[:checked]:bg-emerald-50/50">
+                        <input type="radio" name="groupArrangeMode" value="keep_seats" class="mt-1 accent-emerald-600">
+                        <div>
+                            <div class="font-bold text-sm text-slate-900">僅亂數分組（保留目前座位位置不變）</div>
+                            <div class="text-xs text-slate-500 mt-0.5">不更動目前座位表位置，僅為全班同學隨機分配「第 1~N 組」專屬色塊標籤並產生分組名單。</div>
+                        </div>
+                    </label>
+                </div>
+            </div>
+
+            <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button type="button" onclick="closeGroupModal()" class="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium transition cursor-pointer">
+                    取消
+                </button>
+                <button type="button" onclick="executeRandomGrouping()" class="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold shadow-sm transition flex items-center gap-2 cursor-pointer">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    <span>立即執行亂數分組</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 單一座位/學生編輯視窗 (Modal) -->
+    <div id="editModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 hidden flex items-center justify-center p-4 no-print">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-slate-100">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold text-slate-900 flex items-center gap-2">
+                    <i class="fa-solid fa-user-pen text-indigo-600"></i>
+                    <span id="editModalTitle">編輯學生資訊</span>
+                </h3>
+                <button onclick="closeEditModal()" class="text-slate-400 hover:text-slate-600 w-8 h-8 rounded-lg flex items-center justify-center hover:bg-slate-100 cursor-pointer">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <form id="editSeatForm" onsubmit="saveStudentEdit(event)" class="space-y-4">
+                <input type="hidden" id="editSourceType">
+                <input type="hidden" id="editSourceIndex">
+                
+                <div class="grid grid-cols-3 gap-2.5">
+                    <div class="col-span-1">
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">座號</label>
+                        <input type="text" id="editSeatNumber" placeholder="01" 
+                            class="w-full px-3 py-2 rounded-xl border border-slate-300 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 outline-none text-sm">
+                    </div>
+                    <div class="col-span-2">
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">學生姓名</label>
+                        <input type="text" id="editStudentName" placeholder="請輸入學生姓名" 
+                            class="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 outline-none text-sm font-medium">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">所屬組別 (選填)</label>
+                    <select id="editStudentGroup" class="w-full px-3 py-2 rounded-xl border border-slate-300 focus:border-indigo-600 outline-none text-sm bg-white">
+                        <option value="">無分組</option>
+                        <option value="1">第 1 組</option>
+                        <option value="2">第 2 組</option>
+                        <option value="3">第 3 組</option>
+                        <option value="4">第 4 組</option>
+                        <option value="5">第 5 組</option>
+                        <option value="6">第 6 組</option>
+                        <option value="7">第 7 組</option>
+                        <option value="8">第 8 組</option>
+                        <option value="9">第 9 組</option>
+                        <option value="10">第 10 組</option>
+                        <option value="11">第 11 組</option>
+                        <option value="12">第 12 組</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1.5">自訂名牌底色 (未分組時適用)</label>
+                    <div class="flex items-center gap-2.5" id="colorPickerGroup">
+                        <button type="button" onclick="selectSeatColor('default')" data-color="default" class="color-btn w-7 h-7 rounded-full bg-slate-100 border-2 border-slate-300 focus:outline-none cursor-pointer"></button>
+                        <button type="button" onclick="selectSeatColor('blue')" data-color="blue" class="color-btn w-7 h-7 rounded-full bg-sky-100 border-2 border-sky-400 focus:outline-none cursor-pointer"></button>
+                        <button type="button" onclick="selectSeatColor('pink')" data-color="pink" class="color-btn w-7 h-7 rounded-full bg-pink-100 border-2 border-pink-400 focus:outline-none cursor-pointer"></button>
+                        <button type="button" onclick="selectSeatColor('green')" data-color="green" class="color-btn w-7 h-7 rounded-full bg-emerald-100 border-2 border-emerald-400 focus:outline-none cursor-pointer"></button>
+                        <button type="button" onclick="selectSeatColor('purple')" data-color="purple" class="color-btn w-7 h-7 rounded-full bg-purple-100 border-2 border-purple-400 focus:outline-none cursor-pointer"></button>
+                    </div>
+                </div>
+
+                <div class="pt-2 flex items-center justify-between gap-2">
+                    <button type="button" id="deleteOrUnassignBtn" onclick="removeEditedStudent()" class="px-3 py-2 rounded-xl text-rose-600 hover:bg-rose-50 text-xs sm:text-sm font-medium transition cursor-pointer">
+                        移回待排區
+                    </button>
+                    <div class="flex items-center gap-2">
+                        <button type="button" onclick="closeEditModal()" class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium transition cursor-pointer">
+                            取消
+                        </button>
+                        <button type="submit" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium shadow-xs transition cursor-pointer">
+                            儲存修改
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 新增/管理作業訂正項目視窗 (Modal) -->
+    <div id="hwModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 hidden flex items-center justify-center p-4 no-print">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-slate-100">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold text-slate-900 flex items-center gap-2">
+                    <i class="fa-solid fa-clipboard-check text-indigo-600"></i>
+                    <span id="hwModalTitle">新增作業訂正項目</span>
+                </h3>
+                <button onclick="closeHwModal()" class="text-slate-400 hover:text-slate-600 w-8 h-8 rounded-lg flex items-center justify-center hover:bg-slate-100 cursor-pointer">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <form onsubmit="saveHwAssignment(event)" class="space-y-4">
+                <input type="hidden" id="hwModalMode" value="add">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">作業 / 訂正科目名稱</label>
+                    <input type="text" id="hwNameInput" placeholder="例如：數習 P.32 訂正、國語聽寫訂正..." required
+                        class="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 outline-none text-sm font-medium">
+                </div>
+
+                <div id="hwInitialStatusGroup">
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">新增時全班預設狀態</label>
+                    <select id="hwInitialStatusSelect" class="w-full px-3 py-2 rounded-xl border border-slate-300 focus:border-indigo-600 outline-none text-sm bg-white">
+                        <option value="needs">⏳ 全班預設為「待訂正」（完成者逐一打勾過關）</option>
+                        <option value="done">✅ 全班預設為「已過關」（僅標記少數需訂正學生）</option>
+                        <option value="none">⚪ 全班預設為「未指定」</option>
+                    </select>
+                </div>
+
+                <div class="pt-2 flex items-center justify-between gap-2">
+                    <button type="button" id="deleteHwBtn" onclick="deleteCurrentHwAssignment()" class="hidden px-3 py-2 rounded-xl text-rose-600 hover:bg-rose-50 text-xs sm:text-sm font-medium transition cursor-pointer">
+                        刪除此項目
+                    </button>
+                    <div class="flex items-center gap-2 ml-auto">
+                        <button type="button" onclick="closeHwModal()" class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium transition cursor-pointer">
+                            取消
+                        </button>
+                        <button type="submit" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold shadow-xs transition cursor-pointer">
+                            確認儲存
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 批次匯入名單視窗 (Modal) -->
+    <div id="rosterModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 hidden flex items-center justify-center p-4 no-print">
+        <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-100">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-lg font-bold text-slate-900 flex items-center gap-2">
+                    <i class="fa-solid fa-file-import text-indigo-600"></i>
+                    <span>批次匯入 / 編輯全班名單</span>
+                </h3>
+                <button onclick="closeRosterModal()" class="text-slate-400 hover:text-slate-600 w-8 h-8 rounded-lg flex items-center justify-center hover:bg-slate-100 cursor-pointer">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <p class="text-xs text-slate-500 mb-3 leading-relaxed">
+                請輸入全班學生名單，<b>一行代表一位學生</b>。<br>
+                支援格式：<code class="bg-slate-100 px-1.5 py-0.5 rounded text-slate-700">01 陳冠宇</code> 或直接輸入姓名 <code class="bg-slate-100 px-1.5 py-0.5 rounded text-slate-700">陳冠宇</code>（系統將自動依行號編座號）。
+            </p>
+
+            <textarea id="rosterTextarea" rows="10" 
+                class="w-full p-3.5 rounded-xl border border-slate-300 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 outline-none text-sm font-mono leading-relaxed"
+                placeholder="01 陳冠宇&#10;02 林雅婷&#10;03 張家豪..."></textarea>
+
+            <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
+                <button type="button" onclick="loadSampleRoster()" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium underline cursor-pointer">
+                    載入預設 24 人範例名單
+                </button>
+                <span class="text-xs text-slate-400">可選擇匯入至待排區手動拖曳，或直接排入座位</span>
+            </div>
+
+            <div class="flex flex-wrap items-center justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
+                <button type="button" onclick="closeRosterModal()" class="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs sm:text-sm font-medium transition cursor-pointer">
+                    取消
+                </button>
+                <button type="button" onclick="applyRosterInput('pool')" class="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs sm:text-sm font-medium shadow-xs transition cursor-pointer">
+                    <i class="fa-solid fa-users-rectangle mr-1"></i>匯入至左側待排區 (手動拖曳)
+                </button>
+                <button type="button" onclick="applyRosterInput('seats')" class="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-medium shadow-xs transition cursor-pointer">
+                    <i class="fa-solid fa-table-cells mr-1"></i>匯入並直接依序入座
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 重置確認視窗 (Modal) -->
+    <div id="resetModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 hidden flex items-center justify-center p-4 no-print">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-slate-100">
+            <div class="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center text-xl mb-4">
+                <i class="fa-solid fa-rotate-left"></i>
+            </div>
+            <h3 class="text-lg font-bold text-slate-900 mb-2">重置座位表選項</h3>
+            <p class="text-sm text-slate-600 mb-5">請選擇您要執行的重置方式：</p>
+            
+            <div class="space-y-2.5">
+                <button onclick="resetAllToPool()" class="w-full py-2.5 px-4 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 font-medium text-sm flex items-center justify-center gap-2 transition cursor-pointer">
+                    <i class="fa-solid fa-users-rectangle"></i>
+                    <span>將預設 24 人放入「待排區」重新拖曳</span>
+                </button>
+                <button onclick="resetToDefaultSeated()" class="w-full py-2.5 px-4 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-medium text-sm flex items-center justify-center gap-2 transition cursor-pointer">
+                    <i class="fa-solid fa-rotate"></i>
+                    <span>恢復預設 1~24 號直接入座狀態</span>
+                </button>
+                <button onclick="clearEverything()" class="w-full py-2.5 px-4 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-medium text-sm flex items-center justify-center gap-2 transition cursor-pointer">
+                    <i class="fa-regular fa-trash-can"></i>
+                    <span>清空所有名單與座位 (完全空白)</span>
+                </button>
+                <button onclick="closeResetModal()" class="w-full py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-sm transition cursor-pointer">
+                    取消
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 浮動通知 Toast -->
+    <div id="toast" class="fixed bottom-5 right-5 z-50 transform translate-y-20 opacity-0 transition-all duration-300 pointer-events-none no-print">
+        <div class="bg-slate-900 text-white px-4 py-3 rounded-xl shadow-lg flex items-center gap-2.5 text-sm font-medium">
+            <i id="toastIcon" class="fa-solid fa-circle-check text-emerald-400"></i>
+            <span id="toastMessage">操作成功</span>
+        </div>
+    </div>
+
+    <script>
+        // --- 常數與預設資料設定 ---
+        const ROWS = 4; // 共四橫排
+        const COLS = 6; // 一橫排六個
+        const TOTAL_SEATS = ROWS * COLS; // 共 24 個座位
+        const STORAGE_KEY = 'classroom_seating_grouping_hw_v4';
+
+        const DEFAULT_NAMES = [
+            "陳冠宇", "林雅婷", "張家豪", "王怡君", "李承翰", "黃詩涵",
+            "吳柏翰", "劉佳穎", "蔡宇軒", "楊欣怡", "許家瑋", "鄭詠晴",
+            "謝明哲", "郭子瑄", "洪瑋廷", "邱品妤", "曾柏叡", "廖芷萱",
+            "賴宥廷", "徐子晴", "周俊傑", "葉思妤", "蘇建宏", "莊雅筑"
+        ];
+
+        // 作業訂正狀態定義與循環順序 (待訂正 -> 已完成 -> 訂正中 -> 免訂正)
+        const HW_STATUS_CONFIG = {
+            needs: {
+                key: 'needs',
+                label: '待訂正',
+                shortLabel: '待訂正',
+                icon: 'fa-circle-exclamation',
+                btnClass: 'bg-rose-600 hover:bg-rose-700 text-white shadow-xs ring-2 ring-rose-200',
+                cardClass: 'hw-card-needs hw-status-needs',
+                next: 'done'
+            },
+            done: {
+                key: 'done',
+                label: '已訂正過關',
+                shortLabel: '已過關',
+                icon: 'fa-circle-check',
+                btnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs',
+                cardClass: 'hw-card-done hw-status-done',
+                next: 'progress'
+            },
+            progress: {
+                key: 'progress',
+                label: '訂正中/重訂',
+                shortLabel: '訂正中',
+                icon: 'fa-pen-to-square',
+                btnClass: 'bg-amber-500 hover:bg-amber-600 text-white shadow-xs ring-2 ring-amber-200',
+                cardClass: 'hw-card-progress hw-status-progress',
+                next: 'none'
+            },
+            none: {
+                key: 'none',
+                label: '免訂正/未設',
+                shortLabel: '免訂正',
+                icon: 'fa-minus',
+                btnClass: 'bg-slate-200/80 hover:bg-slate-300 text-slate-600',
+                cardClass: 'hw-status-none',
+                next: 'needs'
+            }
+        };
+
+        // 狀態管理
+        // seatsData: 長度 24，每個元素 { locked: boolean, student: { id, seatNo, name, color, group } | null }
+        let seatsData = [];
+        // unassignedPool: 待排區學生陣列 [{ id, seatNo, name, color, group }]
+        let unassignedPool = [];
+        let isTeacherView = false;
+        let selectedGroupCount = 6; // 預設分成 6 組
+
+        // 作業訂正看板狀態
+        // hwAssignments: [{ id, title, statuses: { [studentKey]: 'needs' | 'done' | 'progress' | 'none' } }]
+        let hwAssignments = [];
+        let activeHwId = '';
+        let isQuickCheckMode = false; // 是否開啟點擊座位直接切換訂正狀態
+        let isHighlightUnfinished = false; // 是否閃爍突顯未完成學生
+        let isProjectionMode = false; // 全螢幕投影模式
+
+        // 拖曳與點選交換狀態
+        // source: { type: 'seat' | 'pool', index: number }
+        let dragSource = null;
+        let selectedSource = null;
+        let currentEditingColor = 'default';
+
+        // 12 組專屬配色主題
+        const GROUP_THEMES = {
+            1:  { name: '第 1 組', bg: 'bg-rose-50/90',    border: 'border-rose-300 hover:border-rose-500',       badge: 'bg-rose-500 text-white',    lightBadge: 'bg-rose-100 text-rose-800',    header: 'bg-rose-500 text-white' },
+            2:  { name: '第 2 組', bg: 'bg-amber-50/90',   border: 'border-amber-300 hover:border-amber-500',     badge: 'bg-amber-500 text-white',   lightBadge: 'bg-amber-100 text-amber-800',  header: 'bg-amber-500 text-white' },
+            3:  { name: '第 3 組', bg: 'bg-emerald-50/90', border: 'border-emerald-300 hover:border-emerald-500', badge: 'bg-emerald-600 text-white', lightBadge: 'bg-emerald-100 text-emerald-800', header: 'bg-emerald-600 text-white' },
+            4:  { name: '第 4 組', bg: 'bg-sky-50/90',     border: 'border-sky-300 hover:border-sky-500',         badge: 'bg-sky-600 text-white',     lightBadge: 'bg-sky-100 text-sky-800',      header: 'bg-sky-600 text-white' },
+            5:  { name: '第 5 組', bg: 'bg-indigo-50/90',  border: 'border-indigo-300 hover:border-indigo-500',   badge: 'bg-indigo-600 text-white',  lightBadge: 'bg-indigo-100 text-indigo-800', header: 'bg-indigo-600 text-white' },
+            6:  { name: '第 6 組', bg: 'bg-purple-50/90',  border: 'border-purple-300 hover:border-purple-500',   badge: 'bg-purple-600 text-white',  lightBadge: 'bg-purple-100 text-purple-800', header: 'bg-purple-600 text-white' },
+            7:  { name: '第 7 組', bg: 'bg-teal-50/90',    border: 'border-teal-300 hover:border-teal-500',       badge: 'bg-teal-600 text-white',    lightBadge: 'bg-teal-100 text-teal-800',    header: 'bg-teal-600 text-white' },
+            8:  { name: '第 8 組', bg: 'bg-orange-50/90',  border: 'border-orange-300 hover:border-orange-500',   badge: 'bg-orange-500 text-white',  lightBadge: 'bg-orange-100 text-orange-800', header: 'bg-orange-500 text-white' },
+            9:  { name: '第 9 組', bg: 'bg-cyan-50/90',    border: 'border-cyan-300 hover:border-cyan-500',       badge: 'bg-cyan-600 text-white',    lightBadge: 'bg-cyan-100 text-cyan-800',    header: 'bg-cyan-600 text-white' },
+            10: { name: '第 10 組', bg: 'bg-pink-50/90',   border: 'border-pink-300 hover:border-pink-500',       badge: 'bg-pink-500 text-white',    lightBadge: 'bg-pink-100 text-pink-800',    header: 'bg-pink-500 text-white' },
+            11: { name: '第 11 組', bg: 'bg-lime-50/90',   border: 'border-lime-300 hover:border-lime-500',       badge: 'bg-lime-600 text-white',    lightBadge: 'bg-lime-100 text-lime-800',    header: 'bg-lime-600 text-white' },
+            12: { name: '第 12 組', bg: 'bg-fuchsia-50/90',border: 'border-fuchsia-300 hover:border-fuchsia-500', badge: 'bg-fuchsia-600 text-white', lightBadge: 'bg-fuchsia-100 text-fuchsia-800', header: 'bg-fuchsia-600 text-white' }
+        };
+
+        // 個人顏色主題對照表
+        const COLOR_THEMES = {
+            default: {
+                bg: 'bg-white',
+                border: 'border-slate-200 hover:border-indigo-400',
+                badge: 'bg-indigo-50 text-indigo-700',
+                chip: 'bg-white border-slate-200 hover:border-indigo-400'
+            },
+            blue: {
+                bg: 'bg-sky-50/80',
+                border: 'border-sky-200 hover:border-sky-400',
+                badge: 'bg-sky-100 text-sky-800',
+                chip: 'bg-sky-50 border-sky-200 hover:border-sky-400'
+            },
+            pink: {
+                bg: 'bg-pink-50/80',
+                border: 'border-pink-200 hover:border-pink-400',
+                badge: 'bg-pink-100 text-pink-800',
+                chip: 'bg-pink-50 border-pink-200 hover:border-pink-400'
+            },
+            green: {
+                bg: 'bg-emerald-50/80',
+                border: 'border-emerald-200 hover:border-emerald-400',
+                badge: 'bg-emerald-100 text-emerald-800',
+                chip: 'bg-emerald-50 border-emerald-200 hover:border-emerald-400'
+            },
+            purple: {
+                bg: 'bg-purple-50/80',
+                border: 'border-purple-200 hover:border-purple-400',
+                badge: 'bg-purple-100 text-purple-800',
+                chip: 'bg-purple-50 border-purple-200 hover:border-purple-400'
+            }
+        };
+
+        // --- 初始化 ---
+        window.addEventListener('DOMContentLoaded', () => {
+            loadFromStorage();
+            setupRosterDropZone();
+            renderAll();
+            updatePrintInfo();
+
+            // 監聽班級名稱變更
+            const classInput = document.getElementById('classNameInput');
+            classInput.addEventListener('input', () => {
+                document.getElementById('printTitle').textContent = classInput.value || '班級座位表';
+                saveToStorage();
+            });
+
+            // 按 Esc 取消選取
+            window.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && selectedSource) {
+                    clearSelection();
+                }
+            });
+        });
+
+        // 產生預設學生清單
+        function createDefaultStudents() {
+            return DEFAULT_NAMES.map((name, i) => ({
+                id: 'stu_' + (i + 1),
+                seatNo: String(i + 1).padStart(2, '0'),
+                name: name,
+                color: 'default',
+                group: null
+            }));
+        }
+
+        // 取得學生的唯一識別鍵 (用於綁定作業訂正狀態，即使換座位或重新匯入同名同座號也能保留狀態)
+        function getStudentHwKey(stu) {
+            if (!stu) return '';
+            return `${stu.seatNo || ''}_${stu.name}`;
+        }
+
+        // 建立預設作業訂正項目與示範狀態，讓老師與學生一眼看出效果
+        function initDefaultHwAssignments(allStudents) {
+            const demoStatuses1 = {};
+            const demoStatuses2 = {};
+            const demoStatuses3 = {};
+
+            allStudents.forEach((stu, idx) => {
+                const key = getStudentHwKey(stu);
+                // 國習訂正：示範大部分已完成，少數待訂正與訂正中
+                if ([2, 5, 11, 16, 21].includes(idx)) {
+                    demoStatuses1[key] = 'needs';
+                } else if ([7, 14].includes(idx)) {
+                    demoStatuses1[key] = 'progress';
+                } else {
+                    demoStatuses1[key] = 'done';
+                }
+                // 數習訂正：示範另一組狀態
+                demoStatuses2[key] = (idx % 3 === 0) ? 'needs' : 'done';
+                // 考卷訂正：預設待訂正
+                demoStatuses3[key] = 'needs';
+            });
+
+            hwAssignments = [
+                { id: 'hw_1', title: '國習訂正', statuses: demoStatuses1 },
+                { id: 'hw_2', title: '數習訂正', statuses: demoStatuses2 },
+                { id: 'hw_3', title: '單元考卷訂正', statuses: demoStatuses3 }
+            ];
+            activeHwId = 'hw_1';
+        }
+
+        // 初始化預設狀態
+        function initDefaultState(putInPool = false) {
+            const students = createDefaultStudents();
+            if (putInPool) {
+                seatsData = Array.from({ length: TOTAL_SEATS }, () => ({
+                    locked: false,
+                    student: null
+                }));
+                unassignedPool = students;
+            } else {
+                seatsData = Array.from({ length: TOTAL_SEATS }, (_, i) => ({
+                    locked: false,
+                    student: students[i] || null
+                }));
+                unassignedPool = [];
+            }
+            if (hwAssignments.length === 0) {
+                initDefaultHwAssignments(students);
+            }
+        }
+
+        // 讀取 LocalStorage
+        function loadFromStorage() {
+            try {
+                const saved = localStorage.getItem(STORAGE_KEY);
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    if (Array.isArray(parsed.seatsData) && parsed.seatsData.length === TOTAL_SEATS) {
+                        seatsData = parsed.seatsData;
+                        unassignedPool = Array.isArray(parsed.unassignedPool) ? parsed.unassignedPool : [];
+                    } else {
+                        initDefaultState(false);
+                    }
+                    if (parsed.className) {
+                        document.getElementById('classNameInput').value = parsed.className;
+                        document.getElementById('printTitle').textContent = parsed.className;
+                    }
+                    if (typeof parsed.isTeacherView === 'boolean') {
+                        isTeacherView = parsed.isTeacherView;
+                    }
+                    if (Array.isArray(parsed.hwAssignments) && parsed.hwAssignments.length > 0) {
+                        hwAssignments = parsed.hwAssignments;
+                        activeHwId = parsed.activeHwId || hwAssignments[0].id;
+                    } else {
+                        initDefaultHwAssignments(getAllCurrentStudents());
+                    }
+                } else {
+                    // 預設載入全班 24 人入座，並初始化作業訂正狀態看板
+                    const students = createDefaultStudents();
+                    seatsData = Array.from({ length: TOTAL_SEATS }, (_, i) => ({
+                        locked: false,
+                        student: students[i] || null
+                    }));
+                    unassignedPool = [];
+                    initDefaultHwAssignments(students);
+                }
+            } catch (e) {
+                initDefaultState(false);
+            }
+        }
+
+        function getAllCurrentStudents() {
+            const list = [];
+            seatsData.forEach(s => { if (s.student) list.push(s.student); });
+            unassignedPool.forEach(stu => list.push(stu));
+            return list;
+        }
+
+        function getCurrentAssignment() {
+            let found = hwAssignments.find(h => h.id === activeHwId);
+            if (!found && hwAssignments.length > 0) {
+                activeHwId = hwAssignments[0].id;
+                found = hwAssignments[0];
+            }
+            return found;
+        }
+
+        function getStudentHwStatus(stu) {
+            if (!stu) return 'none';
+            const currentHw = getCurrentAssignment();
+            if (!currentHw) return 'none';
+            const key = getStudentHwKey(stu);
+            return currentHw.statuses[key] || 'none';
+        }
+
+        function setStudentHwStatus(stu, statusKey) {
+            if (!stu) return;
+            const currentHw = getCurrentAssignment();
+            if (!currentHw) return;
+            const key = getStudentHwKey(stu);
+            currentHw.statuses[key] = statusKey;
+        }
+
+        // 儲存至 LocalStorage
+        function saveToStorage() {
+            try {
+                const payload = {
+                    className: document.getElementById('classNameInput').value,
+                    isTeacherView: isTeacherView,
+                    seatsData: seatsData,
+                    unassignedPool: unassignedPool,
+                    hwAssignments: hwAssignments,
+                    activeHwId: activeHwId
+                };
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+            } catch (e) {
+                console.error('無法儲存座位資料:', e);
+            }
+        }
+
+        function updatePrintInfo() {
+            const now = new Date();
+            const dateStr = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;
+            document.getElementById('printDate').textContent = `列印日期：${dateStr}`;
+        }
+
+        // --- 渲染全部畫面 ---
+        function renderAll(animateShuffle = false) {
+            renderHwTrackerBar();
+            renderRosterPool();
+            renderSeatingChart(animateShuffle);
+            renderHwSummaryLists();
+            renderGroupsSummary();
+            updateSelectionBanner();
+            updateStats();
+        }
+
+        // --- 渲染作業訂正看板 Tabs 與統計進度條 ---
+        function renderHwTrackerBar() {
+            const tabsContainer = document.getElementById('hwTabsContainer');
+            tabsContainer.innerHTML = '';
+
+            hwAssignments.forEach((hw) => {
+                const isActive = hw.id === activeHwId;
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = `px-3 py-1.5 rounded-xl text-xs sm:text-sm font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                    isActive
+                        ? 'bg-indigo-100 text-indigo-800 border-2 border-indigo-500 shadow-2xs'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-2 border-transparent'
+                }`;
+                btn.innerHTML = `<span>${hw.title}</span>`;
+                btn.onclick = () => {
+                    activeHwId = hw.id;
+                    saveToStorage();
+                    renderAll();
+                };
+                tabsContainer.appendChild(btn);
+            });
+
+            // 計算全班目前作業的各狀態人數
+            const allStudents = getAllCurrentStudents();
+            let doneCount = 0;
+            let needsCount = 0;
+            let progressCount = 0;
+
+            allStudents.forEach(stu => {
+                const st = getStudentHwStatus(stu);
+                if (st === 'done') doneCount++;
+                else if (st === 'needs') needsCount++;
+                else if (st === 'progress') progressCount++;
+            });
+
+            const totalTracked = doneCount + needsCount + progressCount;
+            const rate = totalTracked > 0 ? Math.round((doneCount / totalTracked) * 100) : 0;
+
+            document.getElementById('statDoneCount').textContent = doneCount;
+            document.getElementById('statNeedsCount').textContent = needsCount;
+            document.getElementById('statProgressCount').textContent = progressCount;
+            document.getElementById('statCompletionRate').textContent = `${rate}%`;
+
+            const denom = Math.max(1, allStudents.length);
+            document.getElementById('barDone').style.width = `${(doneCount / denom) * 100}%`;
+            document.getElementById('barProgress').style.width = `${(progressCount / denom) * 100}%`;
+            document.getElementById('barNeeds').style.width = `${(needsCount / denom) * 100}%`;
+
+            const currentHw = getCurrentAssignment();
+            const hwTitle = currentHw ? currentHw.title : '作業訂正';
+            document.getElementById('currentHwTitleLabel').textContent = hwTitle;
+            const printSub = document.getElementById('printHwSubtitle');
+            if (printSub) {
+                printSub.textContent = `作業檢查項目：【${hwTitle}】— 已過關 ${doneCount} 人 ／ 待訂正 ${needsCount} 人 ／ 訂正中 ${progressCount} 人`;
+            }
+        }
+
+        // --- 渲染下方「訂正狀態快速核對榜」 ---
+        function renderHwSummaryLists() {
+            const containerNeeds = document.getElementById('listContainerNeeds');
+            const containerProgress = document.getElementById('listContainerProgress');
+            const containerDone = document.getElementById('listContainerDone');
+
+            containerNeeds.innerHTML = '';
+            containerProgress.innerHTML = '';
+            containerDone.innerHTML = '';
+
+            const allStudents = getAllCurrentStudents().sort((a, b) => {
+                return (parseInt(a.seatNo, 10) || 999) - (parseInt(b.seatNo, 10) || 999);
+            });
+
+            let cNeeds = 0, cProgress = 0, cDone = 0;
+
+            allStudents.forEach(stu => {
+                const st = getStudentHwStatus(stu);
+                const chip = document.createElement('button');
+                chip.type = 'button';
+                chip.title = '點擊切換訂正狀態';
+                chip.className = 'px-2.5 py-1 rounded-xl text-xs font-bold border transition flex items-center gap-1 cursor-pointer shadow-2xs ';
+
+                if (st === 'needs') {
+                    cNeeds++;
+                    chip.className += 'bg-white hover:bg-emerald-50 text-rose-700 border-rose-300';
+                    chip.innerHTML = `<span class="opacity-70">${stu.seatNo || ''}</span><span>${stu.name}</span>`;
+                    chip.onclick = () => {
+                        setStudentHwStatus(stu, 'done');
+                        saveToStorage();
+                        renderAll();
+                        showToast(`已將 ${stu.name} 標記為「✅ 已訂正過關」！`);
+                    };
+                    containerNeeds.appendChild(chip);
+                } else if (st === 'progress') {
+                    cProgress++;
+                    chip.className += 'bg-white hover:bg-emerald-50 text-amber-800 border-amber-300';
+                    chip.innerHTML = `<span class="opacity-70">${stu.seatNo || ''}</span><span>${stu.name}</span>`;
+                    chip.onclick = () => {
+                        setStudentHwStatus(stu, 'done');
+                        saveToStorage();
+                        renderAll();
+                        showToast(`已將 ${stu.name} 標記為「✅ 已訂正過關」！`);
+                    };
+                    containerProgress.appendChild(chip);
+                } else if (st === 'done') {
+                    cDone++;
+                    chip.className += 'bg-white hover:bg-rose-50 text-emerald-800 border-emerald-300';
+                    chip.innerHTML = `<i class="fa-solid fa-check text-emerald-600 text-[10px]"></i><span class="opacity-70">${stu.seatNo || ''}</span><span>${stu.name}</span>`;
+                    chip.onclick = () => {
+                        setStudentHwStatus(stu, 'needs');
+                        saveToStorage();
+                        renderAll();
+                        showToast(`已將 ${stu.name} 改為「⏳ 待訂正」`);
+                    };
+                    containerDone.appendChild(chip);
+                }
+            });
+
+            if (cNeeds === 0) {
+                containerNeeds.innerHTML = '<span class="text-xs text-emerald-600 font-bold py-1"><i class="fa-solid fa-party-horn mr-1"></i>太棒了！目前無人待訂正</span>';
+            }
+            if (cProgress === 0) {
+                containerProgress.innerHTML = '<span class="text-xs text-slate-400 py-1">目前無訂正中學生</span>';
+            }
+            if (cDone === 0) {
+                containerDone.innerHTML = '<span class="text-xs text-slate-400 py-1">尚無已過關學生</span>';
+            }
+
+            document.getElementById('listCountNeeds').textContent = `${cNeeds} 人`;
+            document.getElementById('listCountProgress').textContent = `${cProgress} 人`;
+            document.getElementById('listCountDone').textContent = `${cDone} 人`;
+        }
+
+        // 取得學生的視覺配色 (若學生有分組則優先使用組別配色)
+        function getStudentTheme(stu) {
+            if (!stu) return COLOR_THEMES.default;
+            if (stu.group && GROUP_THEMES[stu.group]) {
+                const gt = GROUP_THEMES[stu.group];
+                return {
+                    bg: gt.bg,
+                    border: gt.border,
+                    badge: gt.lightBadge,
+                    chip: `${gt.bg} ${gt.border}`,
+                    groupBadge: gt.badge,
+                    groupName: gt.name
+                };
+            }
+            return COLOR_THEMES[stu.color] || COLOR_THEMES.default;
+        }
+
+        // --- 渲染左側待排學生名單池 ---
+        function renderRosterPool() {
+            const listGrid = document.getElementById('rosterListGrid');
+            const emptyState = document.getElementById('emptyPoolState');
+            const poolBadge = document.getElementById('poolCountBadge');
+
+            listGrid.innerHTML = '';
+            poolBadge.textContent = `待排 ${unassignedPool.length} 人`;
+
+            if (unassignedPool.length === 0) {
+                emptyState.classList.remove('hidden');
+                listGrid.classList.add('hidden');
+                return;
+            }
+
+            emptyState.classList.add('hidden');
+            listGrid.classList.remove('hidden');
+
+            unassignedPool.forEach((stu, poolIdx) => {
+                const isSelected = selectedSource && selectedSource.type === 'pool' && selectedSource.index === poolIdx;
+                const theme = getStudentTheme(stu);
+                const hwStatus = getStudentHwStatus(stu);
+                const hwCfg = HW_STATUS_CONFIG[hwStatus] || HW_STATUS_CONFIG.none;
+
+                const chip = document.createElement('div');
+                chip.setAttribute('draggable', 'true');
+                chip.dataset.sourceType = 'pool';
+                chip.dataset.sourceIndex = poolIdx;
+                chip.className = `
+                    draggable-item group relative rounded-xl border-2 p-2.5 flex items-center justify-between gap-1.5 cursor-grab active:cursor-grabbing shadow-2xs
+                    ${theme.chip}
+                    ${isSelected ? 'selected-item' : ''}
+                `;
+
+                const leftInfo = document.createElement('div');
+                leftInfo.className = 'drag-content-area flex items-center gap-1.5 min-w-0 flex-1';
+                leftInfo.innerHTML = `
+                    <i class="fa-solid fa-grip-vertical text-slate-300 text-[10px] shrink-0"></i>
+                    <span class="text-[11px] font-bold px-1.5 py-0.5 rounded-md shrink-0 ${theme.badge}">
+                        ${stu.seatNo || '--'}
+                    </span>
+                    <span class="font-bold text-sm text-slate-800 truncate">${stu.name}</span>
+                `;
+
+                const rightBox = document.createElement('div');
+                rightBox.className = 'flex items-center gap-1 shrink-0';
+
+                if (hwStatus !== 'none') {
+                    const hwDot = document.createElement('span');
+                    hwDot.className = `drag-content-area text-[10px] font-bold px-1.5 py-0.5 rounded ${hwCfg.btnClass}`;
+                    hwDot.innerHTML = `<i class="fa-solid ${hwCfg.icon}"></i>`;
+                    rightBox.appendChild(hwDot);
+                }
+
+                if (stu.group && GROUP_THEMES[stu.group]) {
+                    const gSpan = document.createElement('span');
+                    gSpan.className = `drag-content-area text-[10px] font-bold px-1.5 py-0.5 rounded ${GROUP_THEMES[stu.group].badge}`;
+                    gSpan.textContent = `${stu.group}組`;
+                    rightBox.appendChild(gSpan);
+                }
+
+                const editBtn = document.createElement('button');
+                editBtn.type = 'button';
+                editBtn.title = '編輯學生';
+                editBtn.draggable = false;
+                editBtn.className = 'interactive-btn text-slate-400 hover:text-indigo-600 p-1 rounded transition text-xs cursor-pointer';
+                editBtn.innerHTML = '<i class="fa-solid fa-pen"></i>';
+                editBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    openEditModal('pool', poolIdx);
+                };
+                rightBox.appendChild(editBtn);
+
+                chip.appendChild(leftInfo);
+                chip.appendChild(rightBox);
+
+                // 點擊選取名牌
+                chip.addEventListener('click', () => handleItemClick('pool', poolIdx));
+
+                // 綁定完整 HTML5 Drag & Drop 與觸控拖曳支援
+                bindDraggableEvents(chip, 'pool', poolIdx, stu.name);
+
+                listGrid.appendChild(chip);
+            });
+        }
+
+        // 設定左側待排區作為 Drop Zone (可將座位上的學生拖回待排區)
+        function setupRosterDropZone() {
+            const dropZone = document.getElementById('rosterDropZone');
+
+            dropZone.addEventListener('dragover', (e) => {
+                if (dragSource && dragSource.type === 'seat') {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    dropZone.classList.add('roster-drag-over');
+                }
+            });
+
+            dropZone.addEventListener('dragleave', (e) => {
+                if (!dropZone.contains(e.relatedTarget)) {
+                    dropZone.classList.remove('roster-drag-over');
+                }
+            });
+
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('roster-drag-over');
+                let src = dragSource;
+                if (!src) {
+                    try {
+                        src = JSON.parse(e.dataTransfer.getData('text/plain'));
+                    } catch (err) {}
+                }
+                if (src && src.type === 'seat') {
+                    unassignSingleSeat(src.index);
+                    dragSource = null;
+                }
+            });
+        }
+
+        // --- 渲染右側 4橫排 x 6直行 座位網格 ---
+        function renderSeatingChart(animateShuffle = false) {
+            const gridContainer = document.getElementById('seatingGrid');
+            const colHeaders = document.getElementById('colHeaders');
+            gridContainer.innerHTML = '';
+            colHeaders.innerHTML = '';
+
+            if (isHighlightUnfinished) {
+                gridContainer.classList.add('highlight-unfinished-mode');
+            } else {
+                gridContainer.classList.remove('highlight-unfinished-mode');
+            }
+
+            // 更新講台視角顯示
+            const podiumTop = document.getElementById('podiumTop');
+            const podiumBottom = document.getElementById('podiumBottom');
+            const backLabel = document.getElementById('classroomBackLabel');
+            const perspectiveText = document.getElementById('perspectiveText');
+
+            if (isTeacherView) {
+                podiumTop.classList.add('hidden');
+                podiumBottom.classList.remove('hidden');
+                backLabel.innerHTML = '<span>— 教室後方 (教師視角遠端) —</span>';
+                gridContainer.parentElement.parentElement.insertBefore(backLabel, gridContainer.parentElement);
+                backLabel.classList.remove('mt-5');
+                backLabel.classList.add('mb-4');
+                perspectiveText.textContent = '視角：講台在下方 (教師俯視)';
+            } else {
+                podiumTop.classList.remove('hidden');
+                podiumBottom.classList.add('hidden');
+                backLabel.innerHTML = '<span>— 教室後方 (佈告欄 / 置物櫃) —</span>';
+                gridContainer.parentElement.parentElement.appendChild(backLabel);
+                backLabel.classList.add('mt-5');
+                backLabel.classList.remove('mb-4');
+                perspectiveText.textContent = '視角：講台在上方';
+            }
+
+            // 產生 6 個直行標頭
+            for (let c = 0; c < COLS; c++) {
+                const colNum = isTeacherView ? (COLS - c) : (c + 1);
+                const colDiv = document.createElement('div');
+                colDiv.textContent = `第 ${colNum} 直行`;
+                colHeaders.appendChild(colDiv);
+            }
+
+            // 橫排渲染順序
+            const rowIndices = [0, 1, 2, 3];
+            if (isTeacherView) {
+                rowIndices.reverse();
+            }
+
+            rowIndices.forEach((r) => {
+                const rowWrapper = document.createElement('div');
+                rowWrapper.className = 'relative';
+
+                const rowHeader = document.createElement('div');
+                rowHeader.className = 'flex items-center justify-between mb-1.5 px-1';
+                rowHeader.innerHTML = `
+                    <span class="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-0.5 rounded-md">
+                        第 ${r + 1} 橫排 (6人)
+                    </span>
+                `;
+                rowWrapper.appendChild(rowHeader);
+
+                const rowGrid = document.createElement('div');
+                rowGrid.className = 'grid grid-cols-6 gap-2.5 sm:gap-3.5';
+
+                const colIndices = [0, 1, 2, 3, 4, 5];
+                if (isTeacherView) {
+                    colIndices.reverse();
+                }
+
+                colIndices.forEach((c) => {
+                    const seatIndex = r * COLS + c;
+                    const seatObj = seatsData[seatIndex];
+                    const stu = seatObj.student;
+                    const isEmpty = !stu;
+                    const isSelected = selectedSource && selectedSource.type === 'seat' && selectedSource.index === seatIndex;
+                    const theme = getStudentTheme(stu);
+                    const hwStatus = getStudentHwStatus(stu);
+                    const hwCfg = HW_STATUS_CONFIG[hwStatus] || HW_STATUS_CONFIG.none;
+
+                    // 決定座位卡片底色：若有設定作業訂正狀態且未分組時，突顯訂正底色；若有分組則保留分組外框並顯示高對比訂正徽章
+                    const useHwCardStyle = !isEmpty && (!stu.group) && hwStatus !== 'none';
+
+                    const card = document.createElement('div');
+                    card.dataset.seatIndex = seatIndex;
+                    card.dataset.sourceType = 'seat';
+                    card.dataset.sourceIndex = seatIndex;
+                    if (!isEmpty) {
+                        card.setAttribute('draggable', 'true');
+                    }
+
+                    card.className = `
+                        seat-card draggable-item group relative rounded-2xl border-2 p-2.5 sm:p-3 flex flex-col justify-between min-h-[124px] shadow-2xs
+                        ${isEmpty ? 'bg-slate-50/70 border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/30 text-slate-400 cursor-pointer' : `${theme.bg} ${theme.border} cursor-grab active:cursor-grabbing`}
+                        ${useHwCardStyle ? hwCfg.cardClass : (!isEmpty ? `hw-status-${hwStatus}` : '')}
+                        ${seatObj.locked ? 'ring-2 ring-amber-400/80' : ''}
+                        ${isSelected ? 'selected-item' : ''}
+                        ${animateShuffle && !seatObj.locked ? 'animate-shuffle' : ''}
+                    `;
+
+                    // 卡片頂部：座號與操作按鈕(鎖定/編輯/移回待排區)
+                    const topBar = document.createElement('div');
+                    topBar.className = 'flex items-center justify-between gap-1';
+
+                    const badgeSpan = document.createElement('span');
+                    badgeSpan.className = `drag-content-area text-[11px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 ${isEmpty ? 'bg-slate-200/70 text-slate-400' : theme.badge}`;
+                    badgeSpan.innerHTML = isEmpty
+                        ? '空座位'
+                        : `<i class="fa-solid fa-grip-vertical opacity-40 text-[9px] no-print"></i><span>${stu.seatNo ? stu.seatNo + ' 號' : '已入座'}</span>`;
+
+                    const actionGroup = document.createElement('div');
+                    actionGroup.className = 'interactive-btn flex items-center gap-0.5 no-print';
+
+                    // 鎖定按鈕
+                    const lockBtn = document.createElement('button');
+                    lockBtn.type = 'button';
+                    lockBtn.draggable = false;
+                    lockBtn.title = seatObj.locked ? '解除鎖定' : '鎖定此座位（隨機排位或全部退回時保持不動）';
+                    lockBtn.className = `w-6 h-6 rounded-lg flex items-center justify-center text-xs transition cursor-pointer ${
+                        seatObj.locked ? 'bg-amber-100 text-amber-600' : 'text-slate-400 hover:text-slate-700 hover:bg-white/80'
+                    }`;
+                    lockBtn.innerHTML = `<i class="fa-solid ${seatObj.locked ? 'fa-lock' : 'fa-lock-open'}"></i>`;
+                    lockBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        toggleLockSeat(seatIndex);
+                    };
+                    actionGroup.appendChild(lockBtn);
+
+                    // 編輯按鈕
+                    const editBtn = document.createElement('button');
+                    editBtn.type = 'button';
+                    editBtn.draggable = false;
+                    editBtn.title = isEmpty ? '在此座位新增學生' : '編輯學生姓名、座號與組別';
+                    editBtn.className = 'w-6 h-6 rounded-lg flex items-center justify-center text-xs text-slate-400 hover:text-indigo-600 hover:bg-white/80 transition cursor-pointer';
+                    editBtn.innerHTML = `<i class="fa-solid ${isEmpty ? 'fa-plus' : 'fa-pen'}"></i>`;
+                    editBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        openEditModal('seat', seatIndex);
+                    };
+                    actionGroup.appendChild(editBtn);
+
+                    // 若座位有人，顯示「移回待排區 (×)」按鈕
+                    if (!isEmpty) {
+                        const removeBtn = document.createElement('button');
+                        removeBtn.type = 'button';
+                        removeBtn.draggable = false;
+                        removeBtn.title = '將此學生移回左側待排區';
+                        removeBtn.className = 'w-6 h-6 rounded-lg flex items-center justify-center text-xs text-slate-400 hover:text-rose-600 hover:bg-white/80 transition cursor-pointer';
+                        removeBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+                        removeBtn.onclick = (e) => {
+                            e.stopPropagation();
+                            unassignSingleSeat(seatIndex);
+                        };
+                        actionGroup.appendChild(removeBtn);
+                    }
+
+                    topBar.appendChild(badgeSpan);
+                    topBar.appendChild(actionGroup);
+
+                    // 卡片中間：學生姓名 + 一目了然的「作業訂正狀態徽章按鈕」
+                    const nameBox = document.createElement('div');
+                    nameBox.className = 'my-1.5 text-center select-none flex flex-col items-center justify-center gap-1.5';
+                    
+                    const nameText = document.createElement('div');
+                    nameText.className = `drag-content-area student-name-display font-bold text-base sm:text-lg tracking-wide truncate max-w-full ${isEmpty ? 'text-slate-400 font-normal text-xs' : 'text-slate-900'}`;
+                    nameText.innerHTML = isEmpty
+                        ? '<i class="fa-solid fa-hand-pointer mr-1 opacity-60"></i>拖入或點選'
+                        : stu.name;
+                    nameBox.appendChild(nameText);
+
+                    // 作業訂正狀態互動按鈕 (讓學生在教室遠處也能清楚看見紅/綠/橘狀態)
+                    if (!isEmpty) {
+                        const hwBtn = document.createElement('button');
+                        hwBtn.type = 'button';
+                        hwBtn.draggable = false;
+                        hwBtn.title = '點擊切換作業訂正狀態：待訂正 ➔ 已過關 ➔ 訂正中 ➔ 免訂正';
+                        hwBtn.className = `interactive-btn group-badge w-full py-1 px-2 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 transition cursor-pointer ${hwCfg.btnClass}`;
+                        hwBtn.innerHTML = `
+                            <i class="fa-solid ${hwCfg.icon}"></i>
+                            <span>${hwCfg.label}</span>
+                        `;
+                        hwBtn.onclick = (e) => {
+                            e.stopPropagation();
+                            cycleStudentHwStatus(seatIndex);
+                        };
+                        nameBox.appendChild(hwBtn);
+                    }
+
+                    // 卡片底部：座標資訊與組別標籤
+                    const bottomBar = document.createElement('div');
+                    bottomBar.className = 'flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-200/60';
+                    
+                    const posSpan = document.createElement('span');
+                    posSpan.className = 'drag-content-area text-[10px] text-slate-400';
+                    posSpan.textContent = `${r + 1}排-${c + 1}列`;
+                    bottomBar.appendChild(posSpan);
+
+                    const rightBottom = document.createElement('div');
+                    rightBottom.className = 'flex items-center gap-1';
+
+                    if (seatObj.locked) {
+                        const lockTag = document.createElement('span');
+                        lockTag.className = 'drag-content-area text-amber-600 font-semibold text-[10px]';
+                        lockTag.innerHTML = '<i class="fa-solid fa-thumbtack mr-0.5"></i>固定';
+                        rightBottom.appendChild(lockTag);
+                    }
+
+                    if (!isEmpty && stu.group && GROUP_THEMES[stu.group]) {
+                        const groupBtn = document.createElement('button');
+                        groupBtn.type = 'button';
+                        groupBtn.draggable = false;
+                        groupBtn.title = '點擊切換組別';
+                        groupBtn.className = `interactive-btn group-badge text-[10px] font-bold px-2 py-0.5 rounded-full shadow-2xs transition hover:opacity-90 cursor-pointer ${GROUP_THEMES[stu.group].badge}`;
+                        groupBtn.textContent = GROUP_THEMES[stu.group].name;
+                        groupBtn.onclick = (e) => {
+                            e.stopPropagation();
+                            cycleStudentGroup(seatIndex);
+                        };
+                        rightBottom.appendChild(groupBtn);
+                    }
+
+                    bottomBar.appendChild(rightBottom);
+
+                    card.appendChild(topBar);
+                    card.appendChild(nameBox);
+                    card.appendChild(bottomBar);
+
+                    // 點擊座位事件 (若開啟「一鍵點名批改模式」，點擊整張卡片直接切換訂正狀態；否則執行座位選取/交換)
+                    card.addEventListener('click', () => {
+                        if (isQuickCheckMode && !isEmpty) {
+                            cycleStudentHwStatus(seatIndex);
+                        } else {
+                            handleItemClick('seat', seatIndex);
+                        }
+                    });
+
+                    // 若座位上有學生，綁定可拖曳事件
+                    if (!isEmpty) {
+                        bindDraggableEvents(card, 'seat', seatIndex, stu.name);
+                    }
+
+                    // 每個座位都是放置目標 (Drop Target)
+                    card.addEventListener('dragover', (e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                        card.classList.add('drag-over');
+                    });
+
+                    card.addEventListener('dragleave', (e) => {
+                        if (!card.contains(e.relatedTarget)) {
+                            card.classList.remove('drag-over');
+                        }
+                    });
+
+                    card.addEventListener('drop', (e) => {
+                        e.preventDefault();
+                        card.classList.remove('drag-over');
+                        let src = dragSource;
+                        if (!src) {
+                            try {
+                                src = JSON.parse(e.dataTransfer.getData('text/plain'));
+                            } catch (err) {}
+                        }
+                        if (src) {
+                            executeMoveOrSwap(src, { type: 'seat', index: seatIndex });
+                            dragSource = null;
+                        }
+                    });
+
+                    rowGrid.appendChild(card);
+                });
+
+                rowWrapper.appendChild(rowGrid);
+                gridContainer.appendChild(rowWrapper);
+            });
+        }
+
+        // --- 統一綁定拖曳事件 (HTML5 Drag & Drop + 觸控拖曳支援) ---
+        function bindDraggableEvents(element, type, index, studentName) {
+            // 1. HTML5 標準滑鼠拖曳
+            element.addEventListener('dragstart', (e) => {
+                // 如果點擊到的是內部按鈕則不啟動拖曳
+                if (e.target && e.target.closest && e.target.closest('.interactive-btn')) {
+                    e.preventDefault();
+                    return;
+                }
+                dragSource = { type, index };
+                clearSelectionWithoutRender();
+                try {
+                    e.dataTransfer.setData('text/plain', JSON.stringify(dragSource));
+                    e.dataTransfer.effectAllowed = 'move';
+                } catch (err) {}
+                setTimeout(() => element.classList.add('dragging'), 0);
+            });
+
+            element.addEventListener('dragend', () => {
+                element.classList.remove('dragging');
+                document.querySelectorAll('.drag-over, .roster-drag-over').forEach(el => {
+                    el.classList.remove('drag-over', 'roster-drag-over');
+                });
+                dragSource = null;
+            });
+
+            // 2. 行動裝置與平板 Touch 拖曳支援
+            let touchTimer = null;
+            let isTouchDragging = false;
+            let ghostEl = null;
+
+            element.addEventListener('touchstart', (e) => {
+                if (e.target && e.target.closest && e.target.closest('.interactive-btn')) return;
+                const touch = e.touches[0];
+                touchTimer = setTimeout(() => {
+                    isTouchDragging = true;
+                    dragSource = { type, index };
+                    element.classList.add('dragging');
+
+                    ghostEl = document.createElement('div');
+                    ghostEl.id = 'touchDragGhost';
+                    ghostEl.className = 'px-4 py-2 rounded-xl bg-indigo-600 text-white font-bold text-sm flex items-center gap-2';
+                    ghostEl.innerHTML = `<i class="fa-solid fa-arrows-up-down-left-right"></i><span>${studentName}</span>`;
+                    ghostEl.style.left = `${touch.clientX}px`;
+                    ghostEl.style.top = `${touch.clientY}px`;
+                    document.body.appendChild(ghostEl);
+                }, 220);
+            }, { passive: true });
+
+            element.addEventListener('touchmove', (e) => {
+                if (!isTouchDragging) {
+                    clearTimeout(touchTimer);
+                    return;
+                }
+                e.preventDefault();
+                const touch = e.touches[0];
+                if (ghostEl) {
+                    ghostEl.style.left = `${touch.clientX}px`;
+                    ghostEl.style.top = `${touch.clientY}px`;
+                }
+
+                document.querySelectorAll('.drag-over, .roster-drag-over').forEach(el => {
+                    el.classList.remove('drag-over', 'roster-drag-over');
+                });
+
+                const targetEl = document.elementFromPoint(touch.clientX, touch.clientY);
+                if (!targetEl) return;
+                const seatCard = targetEl.closest('[data-seat-index]');
+                const rosterZone = targetEl.closest('#rosterDropZone');
+                if (seatCard) {
+                    seatCard.classList.add('drag-over');
+                } else if (rosterZone && type === 'seat') {
+                    rosterZone.classList.add('roster-drag-over');
+                }
+            }, { passive: false });
+
+            element.addEventListener('touchend', (e) => {
+                clearTimeout(touchTimer);
+                if (!isTouchDragging) return;
+                isTouchDragging = false;
+                element.classList.remove('dragging');
+                if (ghostEl) {
+                    ghostEl.remove();
+                    ghostEl = null;
+                }
+
+                document.querySelectorAll('.drag-over, .roster-drag-over').forEach(el => {
+                    el.classList.remove('drag-over', 'roster-drag-over');
+                });
+
+                const touch = e.changedTouches[0];
+                const targetEl = document.elementFromPoint(touch.clientX, touch.clientY);
+                if (targetEl && dragSource) {
+                    const seatCard = targetEl.closest('[data-seat-index]');
+                    const rosterZone = targetEl.closest('#rosterDropZone');
+                    if (seatCard) {
+                        const destIndex = parseInt(seatCard.dataset.seatIndex, 10);
+                        executeMoveOrSwap(dragSource, { type: 'seat', index: destIndex });
+                    } else if (rosterZone && dragSource.type === 'seat') {
+                        unassignSingleSeat(dragSource.index);
+                    }
+                }
+                dragSource = null;
+            });
+        }
+
+        function clearSelectionWithoutRender() {
+            selectedSource = null;
+            document.querySelectorAll('.selected-item').forEach(el => el.classList.remove('selected-item'));
+            document.getElementById('selectionBanner').classList.add('hidden');
+        }
+
+        // --- 渲染下方「分組名單一覽表」 ---
+        function renderGroupsSummary() {
+            const panel = document.getElementById('groupsSummaryPanel');
+            const grid = document.getElementById('groupsSummaryGrid');
+            const clearBtn = document.getElementById('clearGroupsBtn');
+
+            // 收集所有擁有 group 屬性的學生
+            const groupedMap = {};
+            const allStudents = [];
+
+            seatsData.forEach((s, idx) => {
+                if (s.student) {
+                    const r = Math.floor(idx / COLS) + 1;
+                    const c = (idx % COLS) + 1;
+                    allStudents.push({ ...s.student, locationText: `${r}排${c}列` });
+                }
+            });
+            unassignedPool.forEach((stu) => {
+                allStudents.push({ ...stu, locationText: '待排區' });
+            });
+
+            allStudents.forEach((stu) => {
+                if (stu.group && GROUP_THEMES[stu.group]) {
+                    if (!groupedMap[stu.group]) groupedMap[stu.group] = [];
+                    groupedMap[stu.group].push(stu);
+                }
+            });
+
+            const groupKeys = Object.keys(groupedMap).map(Number).sort((a, b) => a - b);
+
+            if (groupKeys.length === 0) {
+                panel.classList.add('hidden');
+                clearBtn.classList.add('hidden');
+                return;
+            }
+
+            panel.classList.remove('hidden');
+            clearBtn.classList.remove('hidden');
+            grid.innerHTML = '';
+
+            groupKeys.forEach((gNum) => {
+                const members = groupedMap[gNum];
+                const gt = GROUP_THEMES[gNum];
+
+                const groupCard = document.createElement('div');
+                groupCard.className = `rounded-2xl border-2 ${gt.border} ${gt.bg} p-4 flex flex-col justify-between shadow-2xs`;
+
+                const header = document.createElement('div');
+                header.className = 'flex items-center justify-between pb-2.5 mb-2.5 border-b border-slate-200/70';
+                header.innerHTML = `
+                    <span class="px-2.5 py-1 rounded-lg text-xs font-bold ${gt.header}">
+                        ${gt.name}
+                    </span>
+                    <span class="text-xs font-semibold text-slate-600">共 ${members.length} 人</span>
+                `;
+
+                const memberList = document.createElement('div');
+                memberList.className = 'grid grid-cols-2 gap-2';
+
+                members.forEach((m) => {
+                    const mItem = document.createElement('div');
+                    mItem.className = 'bg-white/90 rounded-xl px-2.5 py-1.5 border border-slate-200/80 flex items-center justify-between text-xs';
+                    mItem.innerHTML = `
+                        <div class="flex items-center gap-1.5 truncate">
+                            <span class="font-bold text-slate-500">${m.seatNo || '--'}</span>
+                            <span class="font-bold text-slate-800 truncate">${m.name}</span>
+                        </div>
+                        <span class="text-[10px] text-slate-400 shrink-0">${m.locationText}</span>
+                    `;
+                    memberList.appendChild(mItem);
+                });
+
+                groupCard.appendChild(header);
+                groupCard.appendChild(memberList);
+                grid.appendChild(groupCard);
+            });
+        }
+
+        // 更新統計數據
+        function updateStats() {
+            const seatedCount = seatsData.filter(s => s.student !== null).length;
+            const lockedCount = seatsData.filter(s => s.locked).length;
+            document.getElementById('seatedCountText').textContent = seatedCount;
+            document.getElementById('lockedCountText').textContent = lockedCount;
+        }
+
+        // --- 核心移動與交換邏輯 (支援 Pool <-> Seat 及 Seat <-> Seat) ---
+        function executeMoveOrSwap(src, dest) {
+            if (!src || !dest) return;
+            if (src.type === dest.type && src.index === dest.index) return;
+
+            // 情況 1：從左側「待排區 (pool)」拖曳/點選到「座位 (seat)」
+            if (src.type === 'pool' && dest.type === 'seat') {
+                const incomingStudent = unassignedPool[src.index];
+                if (!incomingStudent) return;
+                const targetSeat = seatsData[dest.index];
+
+                if (targetSeat.locked) {
+                    showToast('此座位已鎖定，請先解鎖再排入！', 'warning');
+                    return;
+                }
+
+                const existingStudent = targetSeat.student;
+                targetSeat.student = incomingStudent;
+
+                if (existingStudent) {
+                    unassignedPool.splice(src.index, 1, existingStudent);
+                    showToast(`已將 ${incomingStudent.name} 與 ${existingStudent.name} 互換`);
+                } else {
+                    unassignedPool.splice(src.index, 1);
+                    showToast(`${incomingStudent.name} 已入座`);
+                }
+            }
+            // 情況 2：兩個「座位 (seat)」之間互換或移動
+            else if (src.type === 'seat' && dest.type === 'seat') {
+                const seatA = seatsData[src.index];
+                const seatB = seatsData[dest.index];
+
+                if (seatA.locked || seatB.locked) {
+                    showToast('鎖定的座位無法直接調換，請先解除鎖定', 'warning');
+                    return;
+                }
+
+                const tempStu = seatA.student;
+                seatA.student = seatB.student;
+                seatB.student = tempStu;
+                showToast('座位已調換');
+            }
+            // 情況 3：從「座位 (seat)」點選移回「待排區 (pool)」某位學生進行互換
+            else if (src.type === 'seat' && dest.type === 'pool') {
+                const seatObj = seatsData[src.index];
+                if (seatObj.locked) {
+                    showToast('此座位已鎖定，無法移出', 'warning');
+                    return;
+                }
+                const poolStu = unassignedPool[dest.index];
+                const seatStu = seatObj.student;
+                seatObj.student = poolStu;
+                if (seatStu) {
+                    unassignedPool.splice(dest.index, 1, seatStu);
+                } else {
+                    unassignedPool.splice(dest.index, 1);
+                }
+                showToast(`已換上 ${poolStu.name}`);
+            }
+
+            saveToStorage();
+            renderAll();
+        }
+
+        // 點擊選取互動邏輯
+        function handleItemClick(type, index) {
+            if (!selectedSource) {
+                if (type === 'seat' && !seatsData[index].student) {
+                    return;
+                }
+                selectedSource = { type, index };
+                renderAll();
+                return;
+            }
+
+            if (selectedSource.type === type && selectedSource.index === index) {
+                clearSelection();
+                return;
+            }
+
+            if (selectedSource.type === 'pool' && type === 'pool') {
+                selectedSource = { type, index };
+                renderAll();
+                return;
+            }
+
+            executeMoveOrSwap(selectedSource, { type, index });
+            selectedSource = null;
+            renderAll();
+        }
+
+        function clearSelection() {
+            selectedSource = null;
+            renderAll();
+        }
+
+        function updateSelectionBanner() {
+            const banner = document.getElementById('selectionBanner');
+            const bannerText = document.getElementById('selectionBannerText');
+            if (!selectedSource) {
+                banner.classList.add('hidden');
+                return;
+            }
+
+            let stuName = '';
+            if (selectedSource.type === 'pool') {
+                const s = unassignedPool[selectedSource.index];
+                stuName = s ? `${s.seatNo ? s.seatNo + '號 ' : ''}${s.name} (待排區)` : '';
+            } else {
+                const s = seatsData[selectedSource.index]?.student;
+                stuName = s ? `${s.seatNo ? s.seatNo + '號 ' : ''}${s.name} (座位區)` : '';
+            }
+
+            bannerText.innerHTML = `已選取 <b>${stuName}</b> — 請點擊任意目標座位進行入座或交換位置。`;
+            banner.classList.remove('hidden');
+        }
+
+        // --- 作業訂正狀態操作與管理功能 ---
+        function cycleStudentHwStatus(seatIndex) {
+            const stu = seatsData[seatIndex]?.student;
+            if (!stu) return;
+            const currentStatus = getStudentHwStatus(stu);
+            const nextStatus = HW_STATUS_CONFIG[currentStatus]?.next || 'needs';
+            setStudentHwStatus(stu, nextStatus);
+            saveToStorage();
+            renderAll();
+            const cfg = HW_STATUS_CONFIG[nextStatus];
+            showToast(`${stu.name}：${cfg.label}`);
+        }
+
+        function batchSetHwStatus(statusKey) {
+            const allStudents = getAllCurrentStudents();
+            if (allStudents.length === 0) {
+                showToast('目前沒有學生可設定狀態', 'warning');
+                return;
+            }
+            allStudents.forEach(stu => setStudentHwStatus(stu, statusKey));
+            saveToStorage();
+            renderAll();
+            const label = HW_STATUS_CONFIG[statusKey]?.label || '未指定';
+            showToast(`已將全班作業狀態設為「${label}」`);
+        }
+
+        function toggleQuickCheckMode() {
+            isQuickCheckMode = !isQuickCheckMode;
+            const btn = document.getElementById('quickCheckModeBtn');
+            const text = document.getElementById('quickCheckModeText');
+            if (isQuickCheckMode) {
+                clearSelectionWithoutRender();
+                btn.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border-2 border-amber-500 bg-amber-500 text-white text-xs font-bold shadow-xs transition cursor-pointer';
+                text.textContent = '一鍵點名批改：開啟中 (點擊座位即切換)';
+                showToast('已開啟「一鍵點名批改」：直接點擊任何學生座位即可切換訂正狀態！');
+            } else {
+                btn.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border-2 border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100 text-indigo-800 text-xs font-bold transition cursor-pointer';
+                text.textContent = '一鍵點名批改：關閉 (點擊徽章切換)';
+                showToast('已關閉一鍵批改模式');
+            }
+        }
+
+        function toggleHighlightUnfinished() {
+            isHighlightUnfinished = !isHighlightUnfinished;
+            const btn = document.getElementById('highlightUnfinishedBtn');
+            const text = document.getElementById('highlightUnfinishedText');
+            if (isHighlightUnfinished) {
+                btn.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border-2 border-rose-600 bg-rose-600 text-white text-xs font-bold shadow-xs transition cursor-pointer animate-pulse';
+                text.textContent = '正在突顯未訂正學生 (點擊關閉)';
+                showToast('已突顯尚未訂正完成的學生座位！');
+            } else {
+                btn.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border-2 border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition cursor-pointer';
+                text.textContent = '突顯未完成學生';
+            }
+            renderSeatingChart(false);
+        }
+
+        function toggleProjectionMode() {
+            isProjectionMode = !isProjectionMode;
+            const btn = document.getElementById('projectionModeBtn');
+            const text = document.getElementById('projectionModeText');
+            if (isProjectionMode) {
+                document.body.classList.add('projection-mode');
+                btn.className = 'inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 font-bold text-xs sm:text-sm shadow-xs transition cursor-pointer ring-2 ring-amber-400';
+                text.textContent = '退出投影檢視模式';
+                showToast('已切換為「大字體學生檢視投影模式」');
+            } else {
+                document.body.classList.remove('projection-mode');
+                btn.className = 'inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs sm:text-sm shadow-xs transition cursor-pointer';
+                text.textContent = '學生檢視投影模式';
+            }
+        }
+
+        // 新增 / 編輯作業項目 Modal
+        function openHwModal(mode) {
+            document.getElementById('hwModalMode').value = mode;
+            const titleEl = document.getElementById('hwModalTitle');
+            const nameInput = document.getElementById('hwNameInput');
+            const initGroup = document.getElementById('hwInitialStatusGroup');
+            const delBtn = document.getElementById('deleteHwBtn');
+
+            if (mode === 'edit') {
+                const currentHw = getCurrentAssignment();
+                if (!currentHw) return;
+                titleEl.textContent = '修改作業項目名稱';
+                nameInput.value = currentHw.title;
+                initGroup.classList.add('hidden');
+                if (hwAssignments.length > 1) {
+                    delBtn.classList.remove('hidden');
+                } else {
+                    delBtn.classList.add('hidden');
+                }
+            } else {
+                titleEl.textContent = '新增作業訂正項目';
+                nameInput.value = '';
+                initGroup.classList.remove('hidden');
+                delBtn.classList.add('hidden');
+            }
+
+            document.getElementById('hwModal').classList.remove('hidden');
+            setTimeout(() => nameInput.focus(), 50);
+        }
+
+        function closeHwModal() {
+            document.getElementById('hwModal').classList.add('hidden');
+        }
+
+        function saveHwAssignment(e) {
+            e.preventDefault();
+            const mode = document.getElementById('hwModalMode').value;
+            const title = document.getElementById('hwNameInput').value.trim();
+            if (!title) return;
+
+            if (mode === 'edit') {
+                const currentHw = getCurrentAssignment();
+                if (currentHw) {
+                    currentHw.title = title;
+                    showToast(`已更新作業名稱為「${title}」`);
+                }
+            } else {
+                const initStatus = document.getElementById('hwInitialStatusSelect').value;
+                const statuses = {};
+                getAllCurrentStudents().forEach(stu => {
+                    statuses[getStudentHwKey(stu)] = initStatus;
+                });
+                const newId = 'hw_' + Date.now();
+                hwAssignments.push({
+                    id: newId,
+                    title: title,
+                    statuses: statuses
+                });
+                activeHwId = newId;
+                showToast(`已新增作業項目「${title}」`);
+            }
+
+            saveToStorage();
+            renderAll();
+            closeHwModal();
+        }
+
+        function deleteCurrentHwAssignment() {
+            if (hwAssignments.length <= 1) {
+                showToast('請至少保留一個作業訂正項目', 'warning');
+                return;
+            }
+            const idx = hwAssignments.findIndex(h => h.id === activeHwId);
+            if (idx !== -1) {
+                const removed = hwAssignments.splice(idx, 1)[0];
+                activeHwId = hwAssignments[0].id;
+                saveToStorage();
+                renderAll();
+                closeHwModal();
+                showToast(`已刪除「${removed.title}」`);
+            }
+        }
+
+        // --- 亂數分組核心功能 ---
+        function openGroupModal() {
+            document.getElementById('groupModal').classList.remove('hidden');
+            selectGroupCountOption(selectedGroupCount);
+        }
+
+        function closeGroupModal() {
+            document.getElementById('groupModal').classList.add('hidden');
+        }
+
+        function selectGroupCountOption(count) {
+            selectedGroupCount = count;
+            document.querySelectorAll('#groupCountOptionGrid .group-count-btn').forEach(btn => {
+                if (parseInt(btn.dataset.count, 10) === count) {
+                    btn.classList.add('border-emerald-600', 'bg-emerald-50/70');
+                    btn.classList.remove('border-slate-200');
+                } else {
+                    btn.classList.remove('border-emerald-600', 'bg-emerald-50/70');
+                    btn.classList.add('border-slate-200');
+                }
+            });
+        }
+
+        // 計算 6x4 教室網格的「鄰近小組區塊座位順序」
+        function getClusteredSeatOrder(groupCount) {
+            if (groupCount === 6) {
+                // 6 組 (每組 4 人)：排成 6 個 2x2 鄰近討論方塊！
+                return [
+                    0, 1, 6, 7,       // 第 1 組：左上 2x2 (1,2排 x 1,2列)
+                    2, 3, 8, 9,       // 第 2 組：中上 2x2 (1,2排 x 3,4列)
+                    4, 5, 10, 11,     // 第 3 組：右上 2x2 (1,2排 x 5,6列)
+                    12, 13, 18, 19,   // 第 4 組：左下 2x2 (3,4排 x 1,2列)
+                    14, 15, 20, 21,   // 第 5 組：中下 2x2 (3,4排 x 3,4列)
+                    16, 17, 22, 23    // 第 6 組：右下 2x2 (3,4排 x 5,6列)
+                ];
+            } else if (groupCount === 4) {
+                // 4 組 (每組 6 人)：分成 4 個 2x3 鄰近區塊（左前、右前、左後、右後）
+                return [
+                    0, 1, 2, 6, 7, 8,         // 第 1 組：左前 2x3
+                    3, 4, 5, 9, 10, 11,       // 第 2 組：右前 2x3
+                    12, 13, 14, 18, 19, 20,   // 第 3 組：左後 2x3
+                    15, 16, 17, 21, 22, 23    // 第 4 組：右後 2x3
+                ];
+            } else if (groupCount === 8) {
+                // 8 組 (每組 3 人)：每橫排左右各一組 (1x3 連坐)
+                return Array.from({ length: 24 }, (_, i) => i);
+            } else if (groupCount === 3) {
+                // 3 組 (每組 8 人)：左二直行、中二直行、右二直行 (4x2 區塊)
+                return [
+                    0, 1, 6, 7, 12, 13, 18, 19,
+                    2, 3, 8, 9, 14, 15, 20, 21,
+                    4, 5, 10, 11, 16, 17, 22, 23
+                ];
+            } else {
+                // 2 組或 12 組：標準鄰近連號
+                return Array.from({ length: 24 }, (_, i) => i);
+            }
+        }
+
+        function executeRandomGrouping() {
+            const arrangeMode = document.querySelector('input[name="groupArrangeMode"]:checked')?.value || 'cluster';
+            clearSelectionWithoutRender();
+
+            if (arrangeMode === 'keep_seats') {
+                // 保留現有座位位置，僅將所有學生隨機分成 N 組
+                const allStuRefs = [];
+                seatsData.forEach(s => { if (s.student) allStuRefs.push(s.student); });
+                unassignedPool.forEach(stu => allStuRefs.push(stu));
+
+                if (allStuRefs.length === 0) {
+                    showToast('目前沒有任何學生可供分組！', 'warning');
+                    closeGroupModal();
+                    return;
+                }
+
+                // Fisher-Yates 洗牌學生指標
+                const shuffled = [...allStuRefs];
+                for (let i = shuffled.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+                }
+
+                shuffled.forEach((stu, idx) => {
+                    stu.group = (idx % selectedGroupCount) + 1;
+                });
+
+                saveToStorage();
+                renderAll(true);
+                closeGroupModal();
+                showToast(`已完成亂數分成 ${selectedGroupCount} 組（保留原座位）！`);
+            } else {
+                // 亂數分組 ＋ 自動將同組同學安排在相鄰區塊座位
+                const poolToGroup = [...unassignedPool];
+                seatsData.forEach(s => {
+                    if (!s.locked && s.student) {
+                        poolToGroup.push(s.student);
+                        s.student = null;
+                    }
+                });
+
+                if (poolToGroup.length === 0) {
+                    showToast('沒有未鎖定的學生可參與分組排位！', 'warning');
+                    closeGroupModal();
+                    return;
+                }
+
+                // 隨機打亂所有可排位學生
+                for (let i = poolToGroup.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [poolToGroup[i], poolToGroup[j]] = [poolToGroup[j], poolToGroup[i]];
+                }
+
+                // 分配組別 (使每組人數平均)
+                const totalParticipants = poolToGroup.length;
+                poolToGroup.forEach((stu, idx) => {
+                    const groupNum = Math.min(selectedGroupCount, Math.floor((idx * selectedGroupCount) / totalParticipants) + 1);
+                    stu.group = groupNum;
+                });
+
+                // 依組別編號排序，準備放入鄰近區塊座位
+                poolToGroup.sort((a, b) => a.group - b.group);
+
+                const targetSeatOrder = getClusteredSeatOrder(selectedGroupCount);
+                unassignedPool = [];
+
+                targetSeatOrder.forEach(seatIdx => {
+                    if (!seatsData[seatIdx].locked && poolToGroup.length > 0) {
+                        seatsData[seatIdx].student = poolToGroup.shift();
+                    }
+                });
+
+                if (poolToGroup.length > 0) {
+                    unassignedPool = poolToGroup;
+                }
+
+                saveToStorage();
+                renderAll(true);
+                closeGroupModal();
+                showToast(`已隨機分成 ${selectedGroupCount} 組並自動排入相鄰討論座位！`);
+            }
+        }
+
+        // 點擊座位上的「第 X 組」標籤可循環切換組別
+        function cycleStudentGroup(seatIndex) {
+            const stu = seatsData[seatIndex]?.student;
+            if (!stu) return;
+            const currentGroup = stu.group || 0;
+            stu.group = (currentGroup % selectedGroupCount) + 1;
+            saveToStorage();
+            renderAll();
+            showToast(`${stu.name} 已調整為 第 ${stu.group} 組`);
+        }
+
+        // 清除所有分組標記
+        function clearAllGroups() {
+            seatsData.forEach(s => { if (s.student) s.student.group = null; });
+            unassignedPool.forEach(stu => { stu.group = null; });
+            saveToStorage();
+            renderAll();
+            showToast('已清除所有分組標記');
+        }
+
+        // --- 將單一座位學生移回左側待排區 ---
+        function unassignSingleSeat(seatIndex) {
+            const seatObj = seatsData[seatIndex];
+            if (!seatObj.student) return;
+            if (seatObj.locked) {
+                showToast('此座位已鎖定，請先解鎖再移回名單', 'warning');
+                return;
+            }
+            const removedStu = seatObj.student;
+            seatObj.student = null;
+            unassignedPool.push(removedStu);
+            sortPoolArray();
+            clearSelection();
+            saveToStorage();
+            renderAll();
+            showToast(`已將 ${removedStu.name} 移回待排名單`);
+        }
+
+        // --- 一鍵將所有未鎖定座位的學生退回左側待排區 ---
+        function unassignAllSeats() {
+            let movedCount = 0;
+            seatsData.forEach((seatObj) => {
+                if (!seatObj.locked && seatObj.student) {
+                    unassignedPool.push(seatObj.student);
+                    seatObj.student = null;
+                    movedCount++;
+                }
+            });
+
+            if (movedCount === 0) {
+                showToast('目前座位上沒有可退回的學生', 'warning');
+                return;
+            }
+
+            sortPoolArray();
+            clearSelection();
+            saveToStorage();
+            renderAll();
+            showToast(`已將 ${movedCount} 位學生退回左側名單，請按住姓名拖曳排位！`);
+        }
+
+        function sortPoolArray() {
+            unassignedPool.sort((a, b) => {
+                const numA = parseInt(a.seatNo, 10) || 999;
+                const numB = parseInt(b.seatNo, 10) || 999;
+                return numA - numB;
+            });
+        }
+
+        // --- 快速在待排區新增一位學生 ---
+        function quickAddStudentToPool(e) {
+            e.preventDefault();
+            const noInput = document.getElementById('quickNoInput');
+            const nameInput = document.getElementById('quickNameInput');
+            const name = nameInput.value.trim();
+            if (!name) return;
+
+            const seatNo = noInput.value.trim() || String(unassignedPool.length + 1).padStart(2, '0');
+            unassignedPool.push({
+                id: 'stu_' + Date.now(),
+                seatNo: seatNo.padStart(2, '0'),
+                name: name,
+                color: 'default',
+                group: null
+            });
+
+            noInput.value = '';
+            nameInput.value = '';
+            saveToStorage();
+            renderAll();
+            showToast(`已新增 ${name} 至待排名單`);
+        }
+
+        // --- 依座號一鍵入座 ---
+        function autoFillByNumber() {
+            clearSelectionWithoutRender();
+            const unlockedSeatIndices = [];
+            const availableStudents = [...unassignedPool];
+
+            seatsData.forEach((seatObj, idx) => {
+                if (!seatObj.locked) {
+                    unlockedSeatIndices.push(idx);
+                    if (seatObj.student) {
+                        availableStudents.push(seatObj.student);
+                        seatObj.student = null;
+                    }
+                }
+            });
+
+            if (availableStudents.length === 0) {
+                showToast('沒有可排列的學生名單', 'warning');
+                return;
+            }
+
+            availableStudents.sort((a, b) => {
+                const numA = parseInt(a.seatNo, 10) || 999;
+                const numB = parseInt(b.seatNo, 10) || 999;
+                return numA - numB;
+            });
+
+            unassignedPool = [];
+            unlockedSeatIndices.forEach((seatIdx) => {
+                if (availableStudents.length > 0) {
+                    seatsData[seatIdx].student = availableStudents.shift();
+                }
+            });
+
+            if (availableStudents.length > 0) {
+                unassignedPool = availableStudents;
+            }
+
+            saveToStorage();
+            renderAll(true);
+            showToast('已依座號順序排入座位！');
+        }
+
+        // --- 隨機抽籤入座 ---
+        function shuffleAllStudents() {
+            clearSelectionWithoutRender();
+            const unlockedSeatIndices = [];
+            const poolToShuffle = [...unassignedPool];
+
+            seatsData.forEach((seatObj, idx) => {
+                if (!seatObj.locked) {
+                    unlockedSeatIndices.push(idx);
+                    if (seatObj.student) {
+                        poolToShuffle.push(seatObj.student);
+                        seatObj.student = null;
+                    }
+                }
+            });
+
+            if (poolToShuffle.length === 0) {
+                showToast('目前沒有可參與抽籤的未鎖定學生！', 'warning');
+                return;
+            }
+
+            for (let i = poolToShuffle.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [poolToShuffle[i], poolToShuffle[j]] = [poolToShuffle[j], poolToShuffle[i]];
+            }
+
+            unassignedPool = [];
+            unlockedSeatIndices.forEach((seatIdx) => {
+                if (poolToShuffle.length > 0) {
+                    seatsData[seatIdx].student = poolToShuffle.shift();
+                } else {
+                    seatsData[seatIdx].student = null;
+                }
+            });
+
+            if (poolToShuffle.length > 0) {
+                unassignedPool = poolToShuffle;
+            }
+
+            saveToStorage();
+            renderAll(true);
+            showToast('已完成隨機抽籤排位！');
+        }
+
+        // --- 鎖定 / 解鎖座位 ---
+        function toggleLockSeat(seatIndex) {
+            seatsData[seatIndex].locked = !seatsData[seatIndex].locked;
+            saveToStorage();
+            renderAll();
+            const isLocked = seatsData[seatIndex].locked;
+            showToast(isLocked ? '已鎖定此座位' : '已解除座位鎖定');
+        }
+
+        // --- 切換講台視角 ---
+        function togglePerspective() {
+            isTeacherView = !isTeacherView;
+            saveToStorage();
+            renderAll();
+            showToast(isTeacherView ? '已切換為：教師講台俯視視角' : '已切換為：講台在上方視角');
+        }
+
+        // --- 單一學生/座位編輯視窗 ---
+        function openEditModal(sourceType, index) {
+            document.getElementById('editSourceType').value = sourceType;
+            document.getElementById('editSourceIndex').value = index;
+
+            const delBtn = document.getElementById('deleteOrUnassignBtn');
+            let stu = null;
+
+            if (sourceType === 'pool') {
+                stu = unassignedPool[index];
+                document.getElementById('editModalTitle').textContent = '編輯待排學生';
+                delBtn.textContent = '從名單刪除';
+                delBtn.classList.remove('hidden');
+            } else {
+                stu = seatsData[index].student;
+                document.getElementById('editModalTitle').textContent = stu ? '編輯座位學生' : '在此座位新增學生';
+                if (stu) {
+                    delBtn.textContent = '移回待排區';
+                    delBtn.classList.remove('hidden');
+                } else {
+                    delBtn.classList.add('hidden');
+                }
+            }
+
+            document.getElementById('editSeatNumber').value = stu ? (stu.seatNo || '') : '';
+            document.getElementById('editStudentName').value = stu ? (stu.name || '') : '';
+            document.getElementById('editStudentGroup').value = (stu && stu.group) ? String(stu.group) : '';
+            selectSeatColor(stu ? (stu.color || 'default') : 'default');
+
+            document.getElementById('editModal').classList.remove('hidden');
+            setTimeout(() => document.getElementById('editStudentName').focus(), 50);
+        }
+
+        function closeEditModal() {
+            document.getElementById('editModal').classList.add('hidden');
+        }
+
+        function selectSeatColor(color) {
+            currentEditingColor = color;
+            const buttons = document.querySelectorAll('#colorPickerGroup .color-btn');
+            buttons.forEach(btn => {
+                if (btn.dataset.color === color) {
+                    btn.classList.add('ring-2', 'ring-offset-2', 'ring-indigo-600');
+                } else {
+                    btn.classList.remove('ring-2', 'ring-offset-2', 'ring-indigo-600');
+                }
+            });
+        }
+
+        function saveStudentEdit(e) {
+            e.preventDefault();
+            const sourceType = document.getElementById('editSourceType').value;
+            const index = parseInt(document.getElementById('editSourceIndex').value, 10);
+            const seatNo = document.getElementById('editSeatNumber').value.trim();
+            const name = document.getElementById('editStudentName').value.trim();
+            const groupVal = document.getElementById('editStudentGroup').value;
+            const groupNum = groupVal ? parseInt(groupVal, 10) : null;
+
+            if (sourceType === 'pool') {
+                if (!name) {
+                    unassignedPool.splice(index, 1);
+                } else {
+                    unassignedPool[index].seatNo = seatNo;
+                    unassignedPool[index].name = name;
+                    unassignedPool[index].color = currentEditingColor;
+                    unassignedPool[index].group = groupNum;
+                }
+            } else {
+                if (!name) {
+                    seatsData[index].student = null;
+                } else {
+                    seatsData[index].student = {
+                        id: seatsData[index].student?.id || ('stu_' + Date.now()),
+                        seatNo: seatNo,
+                        name: name,
+                        color: currentEditingColor,
+                        group: groupNum
+                    };
+                }
+            }
+
+            saveToStorage();
+            renderAll();
+            closeEditModal();
+            showToast('學生資訊已儲存');
+        }
+
+        function removeEditedStudent() {
+            const sourceType = document.getElementById('editSourceType').value;
+            const index = parseInt(document.getElementById('editSourceIndex').value, 10);
+
+            if (sourceType === 'pool') {
+                unassignedPool.splice(index, 1);
+                showToast('已從名單移除該學生');
+            } else {
+                const stu = seatsData[index].student;
+                if (stu) {
+                    unassignedPool.push(stu);
+                    seatsData[index].student = null;
+                    sortPoolArray();
+                    showToast(`已將 ${stu.name} 移回待排名單`);
+                }
+            }
+
+            saveToStorage();
+            renderAll();
+            closeEditModal();
+        }
+
+        // --- 批次匯入名單視窗 ---
+        function openRosterModal() {
+            const allStudents = [];
+            seatsData.forEach(s => {
+                if (s.student) allStudents.push(s.student);
+            });
+            unassignedPool.forEach(s => allStudents.push(s));
+
+            allStudents.sort((a, b) => {
+                const numA = parseInt(a.seatNo, 10) || 999;
+                const numB = parseInt(b.seatNo, 10) || 999;
+                return numA - numB;
+            });
+
+            const lines = allStudents.map(s => s.seatNo ? `${s.seatNo} ${s.name}` : s.name);
+            document.getElementById('rosterTextarea').value = lines.join('\n');
+            document.getElementById('rosterModal').classList.remove('hidden');
+        }
+
+        function closeRosterModal() {
+            document.getElementById('rosterModal').classList.add('hidden');
+        }
+
+        function loadSampleRoster() {
+            const sampleLines = DEFAULT_NAMES.map((name, i) => `${String(i + 1).padStart(2, '0')} ${name}`);
+            document.getElementById('rosterTextarea').value = sampleLines.join('\n');
+        }
+
+        function applyRosterInput(targetMode) {
+            const rawText = document.getElementById('rosterTextarea').value;
+            const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(l => l !== '');
+
+            const parsedStudents = lines.map((line, i) => {
+                const match = line.match(/^([0-9A-Za-z]+)[\s.,、．-]+(.+)$/);
+                if (match) {
+                    return {
+                        id: 'stu_' + i + '_' + Date.now(),
+                        seatNo: match[1].padStart(2, '0'),
+                        name: match[2].trim(),
+                        color: 'default',
+                        group: null
+                    };
+                } else {
+                    return {
+                        id: 'stu_' + i + '_' + Date.now(),
+                        seatNo: String(i + 1).padStart(2, '0'),
+                        name: line,
+                        color: 'default',
+                        group: null
+                    };
+                }
+            });
+
+            clearSelectionWithoutRender();
+
+            if (targetMode === 'pool') {
+                seatsData = Array.from({ length: TOTAL_SEATS }, () => ({
+                    locked: false,
+                    student: null
+                }));
+                unassignedPool = parsedStudents;
+                showToast(`已匯入 ${parsedStudents.length} 人至左側待排區，請按住姓名拖曳排位！`);
+            } else {
+                seatsData = Array.from({ length: TOTAL_SEATS }, (_, i) => ({
+                    locked: false,
+                    student: parsedStudents[i] || null
+                }));
+                unassignedPool = parsedStudents.slice(TOTAL_SEATS);
+                showToast(`已匯入名單並直接排入座位！`);
+            }
+
+            saveToStorage();
+            renderAll(true);
+            closeRosterModal();
+        }
+
+        // --- 重置視窗選項 ---
+        function openResetModal() {
+            document.getElementById('resetModal').classList.remove('hidden');
+        }
+
+        function closeResetModal() {
+            document.getElementById('resetModal').classList.add('hidden');
+        }
+
+        function resetAllToPool() {
+            initDefaultState(true);
+            clearSelectionWithoutRender();
+            saveToStorage();
+            renderAll();
+            closeResetModal();
+            showToast('已將 24 人放入左側待排區，請按住姓名拖曳排位！');
+        }
+
+        function resetToDefaultSeated() {
+            initDefaultState(false);
+            clearSelectionWithoutRender();
+            saveToStorage();
+            renderAll(true);
+            closeResetModal();
+            showToast('已恢復預設 1~24 號入座狀態');
+        }
+
+        function clearEverything() {
+            seatsData = Array.from({ length: TOTAL_SEATS }, () => ({
+                locked: false,
+                student: null
+            }));
+            unassignedPool = [];
+            clearSelectionWithoutRender();
+            saveToStorage();
+            renderAll();
+            closeResetModal();
+            showToast('已清空所有名單與座位');
+        }
+
+        // --- Toast 訊息提示 ---
+        let toastTimer = null;
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toastMessage');
+            const toastIcon = document.getElementById('toastIcon');
+
+            toastMsg.textContent = message;
+            if (type === 'warning') {
+                toastIcon.className = 'fa-solid fa-circle-exclamation text-amber-400';
+            } else {
+                toastIcon.className = 'fa-solid fa-circle-check text-emerald-400';
+            }
+
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => {
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 2500);
+        }
+    </script>
+</body>
+</html>
